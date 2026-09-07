@@ -14,13 +14,12 @@ import io
 import json
 import pathlib
 import re
-import secrets
-from collections import Counter
-from functools import lru_cache, wraps
+from functools import wraps
 from hmac import compare_digest
 from uuid import uuid4
 
 import appsettings
+from helper import csrf_token, decode, image_from_request, list_people, thumbnail_bytes
 
 import cv2
 import numpy as np
@@ -51,20 +50,6 @@ def detect(img):
     detector.setInputSize((img.shape[1], img.shape[0]))
     _, faces = detector.detect(img)
     return faces if faces is not None else np.empty((0, 15), np.float32)
-
-
-def decode(blob):
-    return cv2.imdecode(np.frombuffer(blob, np.uint8), cv2.IMREAD_COLOR) if blob else None
-
-
-def image_from_request():
-    # ESP32 posts the raw JPEG body; multipart is what the browser and curl send.
-    # Only touch request.files for multipart -- reading it otherwise makes Werkzeug
-    # form-parse the body and get_data() then comes back empty.
-    if request.mimetype == "multipart/form-data":
-        upload = request.files.get("image")
-        return upload.read() if upload else b""
-    return request.get_data()
 
 
 def load_faces():
@@ -133,13 +118,6 @@ if secrets_path.is_file():
 def logged_in():
     user = session.get("user", {})
     return bool(user.get("sub") and user.get("email") in ALLOWED_EMAILS)
-
-
-
-def csrf_token():
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_urlsafe(32)
-    return session["csrf_token"]
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
@@ -229,28 +207,8 @@ def logout():
 @app.get("/")
 @login_required
 def index():
-    people = [dict(name=name, photos=count)
-              for name, count in sorted(Counter(name for name, _ in KNOWN_FACES).items())]
-    for person in people:
-        person["images"] = [path.name for path in sorted((FACES / person["name"]).glob("*"))
-                            if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".bmp"}]
+    people = list_people(FACES, KNOWN_FACES)
     return render_template("index.html", people=people)
-
-
-@lru_cache(maxsize=128)
-def thumbnail_bytes(path, modified_ns):
-    """Cache small previews; a file modification invalidates its cached version."""
-    img = cv2.imread(path)
-    if img is None:
-        abort(404)
-    height, width = img.shape[:2]
-    scale = min(160 / width, 160 / height, 1)
-    if scale < 1:
-        img = cv2.resize(img, (max(1, round(width * scale)), max(1, round(height * scale))), interpolation=cv2.INTER_AREA)
-    ok, encoded = cv2.imencode(".jpg", img)
-    if not ok:
-        abort(404)
-    return encoded.tobytes()
 
 
 @app.get("/photos/<name>/<filename>")
