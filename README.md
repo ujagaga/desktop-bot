@@ -58,7 +58,7 @@ Create a Python environment and install the server dependencies:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-server.txt
 ```
 
 Place these model files in `models/` before starting the server:

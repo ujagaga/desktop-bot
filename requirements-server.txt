@@ -1,2 +1,4 @@
--r requirements.txt
+flask
+numpy
+opencv-python-headless
 gunicorn
