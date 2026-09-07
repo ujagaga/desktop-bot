@@ -78,7 +78,6 @@ Edit `appsettings.py` and set the following values:
 | --- | --- |
 | `GOOGLE_CLIENT_SECRETS_FILE` | Google web OAuth credentials; defaults to `client_secret.json` beside `server.py`. |
 | `ALLOWED_EMAILS` | List of Google email addresses allowed to manage the library; empty denies everyone. |
-| `OAUTH_REDIRECT_URI` | Exact public callback URL, e.g. `https://faces.example.com/oauth2callback`. |
 | `API_KEY` | Shared client credential for recognition **and enrollment**. |
 | `SECRET_KEY` | Private random key for signing browser sessions. |
 | `COOKIE_SECURE` | Set to `True` when serving over HTTPS; keep `False` for local HTTP. |
@@ -108,17 +107,18 @@ project folder on the Pi. Set these values in its existing `appsettings.py`:
 ```python
 ALLOWED_EMAILS = ["you@example.com"]
 GOOGLE_CLIENT_SECRETS_FILE = "client_secret.json"
-OAUTH_REDIRECT_URI = "https://faces.example.com/oauth2callback"
 COOKIE_SECURE = True
 ```
 
-Use your actual HTTPS hostname, and add that exact callback URL to the client's
+The callback URL is resolved at runtime as `https://<request-host>/oauth2callback`,
+like the printer server. Add that exact URL to the client's
 **Authorized redirect URIs** in Google Cloud. A client shared with the printer
 server needs this additional redirect URI. Configure the Google consent screen
 and test users if the OAuth application is in testing mode. For local development,
 `http://localhost:8000/oauth2callback` can be used with `COOKIE_SECURE = False`.
 For access to the Pi from other computers, serve it through an HTTPS reverse proxy
-and set the explicit public `OAUTH_REDIRECT_URI` above.
+that preserves the original Host header. Localhost and 127.0.0.1 callbacks use HTTP.
+`OAUTH_REDIRECT_URI` is no longer used and can be removed from existing settings.
 
 Run `bash install.sh` to install the new dependencies and restart the service.
 For subsequent credential or settings changes, restart `face-recognition.service`.
@@ -171,27 +171,29 @@ source .venv-client/bin/activate
 pip install -r requirements-client.txt
 ```
 
-On a separate client computer, create an `appsettings.py` containing only the
-matching server API key:
+Copy `clientsettings.example.py` to `clientsettings.py` beside `client.py`,
+then configure the full recognition URL and matching server API key:
 
 ```python
+SERVER = "http://<pi-address>:8000/recognize"
 API_KEY = "your-server-api-key"
 ```
 
-Start the client, pointing it at the server:
+Start the client:
 
 ```bash
-SERVER=http://<pi-address>:8000/recognize python client.py
+python client.py
 ```
 
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
-| `SERVER` | `http://127.0.0.1:8000/recognize` | Recognition endpoint; enrollment uses `/enroll` on the same server. |
-| `API_KEY` | `appsettings.API_KEY` | Override the configured client key. |
+| `SERVER` | `clientsettings.SERVER` | Recognition endpoint; enrollment uses `/enroll` on the same server. |
+| `API_KEY` | `clientsettings.API_KEY` | Override the configured client key. |
 | `CAMERA` | `0` | Webcam device index. |
 
-The client still requires `appsettings.py` with an `API_KEY` value when using an
-environment override.
+Environment variables override `clientsettings.py` when needed. The client does
+not need server `appsettings.py` or Google OAuth credentials. `clientsettings.py`
+is ignored by Git to keep your API key private.
 
 ### Recognition and enrollment
 
@@ -223,7 +225,7 @@ Browser enrollment instead uses a login session and the `csrf_token` form field.
 ## Local files and checks
 
 `.gitignore` excludes Python virtual environments, bytecode caches, the local
-`tests/` directory, `appsettings.py`, `client_secret*.json`, and downloaded ONNX model weights. Keep
+`tests/` directory, `appsettings.py`, `clientsettings.py`, `client_secret*.json`, and downloaded ONNX model weights. Keep
 `appsettings.example.py` as the shareable configuration template. Reference photos
 under `faces/` are not excluded by these rules.
 

@@ -5,7 +5,7 @@ returned boxes and names on the frozen frame. E enrolls a single detected face;
 Space resumes, Q or ESC quits. Enrollment prompts for a name in
 the terminal where the client was launched.
 
-Point it elsewhere with:  SERVER=http://pi:8000/recognize python client.py
+Configure SERVER and API_KEY in clientsettings.py. Environment variables can override them.
 """
 
 import json
@@ -21,10 +21,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "xcb")  # cv2's wheel ships no wayland 
 
 import cv2
 
-import appsettings
+import clientsettings
 
-SERVER = os.environ.get("SERVER", "http://127.0.0.1:8000/recognize")
-API_KEY = os.environ.get("API_KEY", appsettings.API_KEY)
+SERVER = os.environ.get("SERVER", clientsettings.SERVER)
+API_KEY = os.environ.get("API_KEY", clientsettings.API_KEY)
 WINDOW = "face test client"
 GREEN, RED, WHITE = (0, 200, 0), (0, 0, 255), (255, 255, 255)
 
@@ -103,6 +103,8 @@ def annotate(frame, result):
 
 
 def main():
+    if not API_KEY:
+        sys.exit("Set API_KEY in clientsettings.py before starting the client.")
     camera = cv2.VideoCapture(int(os.environ.get("CAMERA", 0)))
     if not camera.isOpened():
         sys.exit("could not open camera")

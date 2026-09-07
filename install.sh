@@ -62,8 +62,7 @@ if not path.exists():
                f'SECRET_KEY = "{secrets.token_urlsafe(48)}"\n'
                'COOKIE_SECURE = False\n'
                'GOOGLE_CLIENT_SECRETS_FILE = "client_secret.json"\n'
-               'ALLOWED_EMAILS = []\n'
-               'OAUTH_REDIRECT_URI = ""\n')
+               'ALLOWED_EMAILS = []\n')
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as output:
         output.write(content)
@@ -111,6 +110,7 @@ EOF_UNIT
 as_root install -m 0644 "$UNIT_FILE" "/etc/systemd/system/$SERVICE_NAME"
 as_root systemctl daemon-reload
 as_root systemctl enable "$SERVICE_NAME"
+as_root systemctl reset-failed "$SERVICE_NAME"
 as_root systemctl restart "$SERVICE_NAME"
 
 echo "Waiting for the server to respond..."
@@ -129,7 +129,7 @@ if [[ "$READY" != true ]]; then
 fi
 
 echo "Installed and started $SERVICE_NAME; it will start automatically on boot."
-echo "Copy client_secret.json into $APP_DIR and configure ALLOWED_EMAILS and OAUTH_REDIRECT_URI in appsettings.py."
+echo "Copy client_secret.json into $APP_DIR and configure ALLOWED_EMAILS in appsettings.py."
 echo "Restart $SERVICE_NAME after configuring Google login. See README.md for HTTPS setup."
 echo "Logs: sudo journalctl -u $SERVICE_NAME -f"
 echo "Restart: sudo systemctl restart $SERVICE_NAME"

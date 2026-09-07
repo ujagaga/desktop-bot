@@ -9,9 +9,12 @@ __pycache__/
 # Local tests and credentials
 /tests/
 appsettings.py
+clientsettings.py
 
 # Downloaded model weights
 models/*.onnx
 
 # Google OAuth credentials
 client_secret*.json
+
+faces

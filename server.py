@@ -116,7 +116,6 @@ secrets_path = pathlib.Path(getattr(appsettings, "GOOGLE_CLIENT_SECRETS_FILE", "
 if not secrets_path.is_absolute():
     secrets_path = pathlib.Path(__file__).parent / secrets_path
 ALLOWED_EMAILS = {email.strip().casefold() for email in getattr(appsettings, "ALLOWED_EMAILS", [])}
-OAUTH_REDIRECT_URI = getattr(appsettings, "OAUTH_REDIRECT_URI", "")
 oauth = OAuth(app)
 google = None
 if secrets_path.is_file():
@@ -193,7 +192,8 @@ def google_login():
         return render_template("login.html", error="Google login is not configured."), 503
     session.clear()
     return google.authorize_redirect(
-        OAUTH_REDIRECT_URI or url_for("oauth2callback", _external=True),
+        url_for("oauth2callback", _external=True,
+                _scheme="http" if request.host.split(":", 1)[0] in {"localhost", "127.0.0.1"} else "https"),
         prompt="select_account",
     )
 
