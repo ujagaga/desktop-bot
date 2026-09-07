@@ -167,7 +167,7 @@ import urllib.request
 import appsettings
 for attempt in range(20):
     try:
-        request = urllib.request.Request('http://127.0.0.1:8001/health',
+        request = urllib.request.Request('http://127.0.0.1:8041/health',
             headers={'X-API-Key': appsettings.API_KEY})
         with urllib.request.urlopen(request, timeout=2) as response:
             assert response.status == 200
@@ -185,5 +185,5 @@ echo "Logs: sudo journalctl -u $SERVICE_NAME -f"
 echo "Restart: sudo systemctl restart $SERVICE_NAME"
 echo "Keep this project at $APP_DIR: the service runs from this directory."
 
-echo "Gemini gateway installed on port 8001 (face-conversation.service)."
+echo "Gemini gateway installed on port 8041 (face-conversation.service)."
 echo "Set GEMINI_API_KEY in appsettings.py, then sudo systemctl restart face-conversation.service."

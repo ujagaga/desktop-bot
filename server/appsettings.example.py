@@ -5,7 +5,7 @@ COOKIE_SECURE = False
 GOOGLE_CLIENT_SECRETS_FILE = "client_secret.json"
 ALLOWED_EMAILS = ["you@example.com"]
 
-# Gemini conversation gateway (port 8001); cloud key stays on the Pi.
+# Gemini conversation gateway (port 8041); cloud key stays on the Pi.
 GEMINI_API_KEY = ""
 GEMINI_MODEL = "gemini-3.1-flash-live-preview"
 GEMINI_MAX_SESSIONS = 2

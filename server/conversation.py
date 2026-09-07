@@ -213,4 +213,4 @@ def create_app(config=None, gemini_url=GEMINI_URL):
 
 
 if __name__ == '__main__':
-    web.run_app(create_app(), host='0.0.0.0', port=8001, access_log=None)
+    web.run_app(create_app(), host='0.0.0.0', port=8041, access_log=None)

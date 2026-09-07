@@ -1,6 +1,6 @@
 # Gemini conversation gateway
 
-`server/conversation.py` is an asynchronous service on port **8001**, separate from the
+`server/conversation.py` is an asynchronous service on port **8041**, separate from the
 Flask/OpenCV server on port 8000. The ESP32 connects to the Pi; the Pi connects to
 [Gemini Live](https://ai.google.dev/gemini-api/docs/live-api). Google browser OAuth
 credentials (`client_secret.json`) are unrelated to the Gemini API key.
@@ -35,7 +35,7 @@ The gateway itself does not load OpenCV models. The recognition server must be
 running for snapshot recognition, but audio/text conversations work independently.
 
 Use WSS through your HTTPS reverse proxy outside a trusted local network. Route
-`/conversation` and `/health` to port 8001, forward `X-API-Key`, enable WebSocket
+`/conversation` and `/health` to port 8041, forward `X-API-Key`, enable WebSocket
 Upgrade forwarding, and use an idle timeout longer than 60 seconds. Keep the
 existing browser and recognition routes on port 8000.
 
@@ -55,7 +55,7 @@ After upgrade, setup failures produce an `error` event and close the connection.
 
 ## ESP32 WebSocket protocol
 
-Connect to `ws://<pi-address>:8001/conversation` on a trusted LAN (WSS through the
+Connect to `ws://<pi-address>:8041/conversation` on a trusted LAN (WSS through the
 proxy). Wait for this JSON text frame before sending input:
 
 ```json
@@ -118,7 +118,7 @@ import clientsettings
 async def main():
     async with aiohttp.ClientSession() as http:
         async with http.ws_connect(
-            "ws://<pi-address>:8001/conversation",
+            "ws://<pi-address>:8041/conversation",
             headers={"X-API-Key": clientsettings.API_KEY},
         ) as ws:
             print(await ws.receive_json())  # ready (or configuration error)

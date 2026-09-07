@@ -231,7 +231,7 @@ want to enroll.
 
 ## Gemini voice conversations
 
-The separate gateway on port 8001 connects an ESP32 microphone and speaker to
+The separate gateway on port 8041 connects an ESP32 microphone and speaker to
 Gemini Live, with optional face-recognition context. See [GEMINI.md](GEMINI.md)
 for API-key configuration, installation, the WebSocket protocol, and a smoke test.
 The installer also manages `face-conversation.service`.
