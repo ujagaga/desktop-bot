@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="page-header"><div><span class="eyebrow">YOUR LIBRARY</span><h1>Known faces<span class="heading-dot">.</span></h1><p class="muted">The people you know. Ready for the next hello.</p></div><form action="{{ url_for('logout') }}" method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" type="submit">Log out <span aria-hidden="true">↗</span></button>
+</form></header>
+<div class="library-summary"><span><strong>{{ people|length }}</strong> {{ 'person' if people|length == 1 else 'people' }} in your library</span><span><strong>{{ people|sum(attribute='photos') }}</strong> reference photos</span><a href="#add-face">Add a face <span aria-hidden="true">↗</span></a></div>
+<div class="face-layout"><div class="face-management">
+<section class="panel library-panel" aria-labelledby="library-heading"><div class="panel-heading"><h2 id="library-heading">People</h2><span class="subtle-label">SELECT A PHOTO TO PREVIEW</span></div>
+{% if people %}
+<div class="people-list">
+{% for person in people %}
+<article class="person-row"><div class="person-heading"><span class="person-avatar" aria-hidden="true">{{ person.name[:1]|upper }}</span><div><h3>{{ person.name }}</h3><span class="muted photo-count">{{ person.photos }} reference {{ 'photo' if person.photos == 1 else 'photos' }}</span></div></div><div class="thumbnails">
+{% for filename in person.images %}
+<button type="button" class="thumbnail" data-preview="{{ url_for('photo', name=person.name, filename=filename) }}" data-caption="{{ person.name }} — photo {{ loop.index }}" aria-label="Preview {{ person.name }}, photo {{ loop.index }}" aria-pressed="false">
+<img src="{{ url_for('photo', name=person.name, filename=filename, thumbnail=1) }}" alt="{{ person.name }}, photo {{ loop.index }}" width="80" height="80" loading="lazy">
+</button>
+{% endfor %}
+</div></article>
+{% endfor %}</div>
+{% else %}<div class="empty-library"><span class="empty-symbol" aria-hidden="true">＋</span><h3>Your first familiar face starts here</h3><p>No known faces yet. Add a photo to begin your library.</p><a class="text-link" href="#add-face">Add your first face →</a></div>{% endif %}
+</section>
+<section class="panel upload-panel" id="add-face"><div class="panel-heading"><h2>Add a face</h2><span class="step-badge">＋</span></div><p class="muted">One clear photo. One familiar face. Use an existing name to add another reference photo.</p>
+<form id="upload" action="{{ url_for('enroll') }}" method="post" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label for="person-name">Person’s name</label><input id="person-name" name="name" required pattern="[A-Za-z0-9_-]{1,32}" maxlength="32" aria-describedby="name-help" placeholder="e.g. Alex" autocomplete="off">
+<small id="name-help">1–32 letters, digits, underscores, or hyphens.</small>
+<div class="file-field"><label for="face-photo">Choose a photo</label><p>Exactly one face · Up to 10 MB</p><input id="face-photo" name="image" type="file" accept="image/*" required></div>
+<div class="upload-footer"><span class="muted">Available for recognition as soon as it’s saved.</span><button class="primary" type="submit">Upload face <span aria-hidden="true">↑</span></button></div>
+<p id="status" role="status" aria-live="polite"></p>
+</form></section></div>
+<aside class="panel image-preview" aria-labelledby="preview-heading"><div class="panel-heading"><h2 id="preview-heading">Image preview</h2><span class="subtle-label">PHOTO DETAIL</span></div>
+<div class="preview-stage"><div id="preview-placeholder"><span class="preview-frame" aria-hidden="true"><span></span></span><h3>A closer look</h3><p>Select any saved photo<br>to view it here.</p></div><img id="preview-image" alt="" hidden></div>
+<div class="preview-caption"><span class="eyebrow">SELECTED PHOTO</span><p id="preview-caption" aria-live="polite">No photo selected</p></div>
+</aside></div>
+<footer class="page-footer">Familiar <span>Recognition starts with a familiar face.</span></footer>
+<script>
+const preview = document.querySelector('#preview-image');
+const caption = document.querySelector('#preview-caption');
+preview.addEventListener('error', () => {
+  preview.hidden = true;
+  document.querySelector('#preview-placeholder').hidden = false;
+  caption.textContent = 'Could not load this photo. Reload the page and try again.';
+});
+document.querySelectorAll('.thumbnail').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('.thumbnail').forEach(item => item.setAttribute('aria-pressed', 'false'));
+    button.setAttribute('aria-pressed', 'true');
+    preview.alt = button.dataset.caption;
+    preview.src = button.dataset.preview;
+    preview.hidden = false;
+    document.querySelector('#preview-placeholder').hidden = true;
+    caption.textContent = button.dataset.caption;
+  });
+});
+const form = document.querySelector('#upload');
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = form.querySelector('button');
+  const status = document.querySelector('#status');
+  button.disabled = true;
+  status.textContent = 'Uploading…';
+  try {
+    const response = await fetch(form.action, {method: 'POST', body: new FormData(form)});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Upload failed.');
+    window.location.reload();
+  } catch (error) {
+    status.textContent = error.message;
+    button.disabled = false;
+  }
+});
+</script>
+{% endblock %}

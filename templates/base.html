@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#163c35">
+  <title>{% block title %}Known faces{% endblock %} · Familiar</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner"><a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">f.</span> familiar<span class="brand-description">FACE RECOGNITION</span></a><span class="topbar-note">A place for familiar faces</span></div></div>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>
