@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """Face recognition server: browser UI, snapshot recognition, and enrollment.
 
 Pipeline: YuNet detect -> 5-point align -> SFace embed -> cosine match.

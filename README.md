@@ -4,7 +4,54 @@ A Python face recognition server intended for a Raspberry Pi 4, with a browser
 interface for managing known faces and a webcam client for recognition and enrollment.
 It uses OpenCV YuNet for face detection and SFace for recognition.
 
-## Server setup
+## Install as a Raspberry Pi service
+
+Use **64-bit Raspberry Pi OS (arm64)** with internet access and a normal user
+account that has sudo access. Keep this project in a permanent, user-writable
+folder, for example `/home/pi/desktop-bot`. Paths must not contain spaces or
+special characters.
+
+From the project folder, run:
+
+```bash
+bash install.sh
+```
+
+The installer asks for sudo access for system packages and service setup. It:
+
+- Installs Python and required system libraries.
+- Creates `.venv-server/` and installs `requirements-server.txt` (including Gunicorn).
+- Downloads missing [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
+  and [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)
+  model files from OpenCV Zoo.
+- Generates private credentials in `appsettings.py` if it does not exist.
+  Existing credentials and face photos are preserved. Empty credentials must be
+  filled in before installation can finish.
+- Checks application startup, then installs and starts `face-recognition.service`
+  and enables it at boot.
+
+Open `http://<pi-address>:8000` and read your login password from `appsettings.py`.
+The webcam client runs separately; it is not installed as a service on the Pi.
+
+```bash
+sudo systemctl status face-recognition.service
+sudo journalctl -u face-recognition.service -f
+sudo systemctl restart face-recognition.service
+# Stop the service and disable startup at boot:
+sudo systemctl disable --now face-recognition.service
+```
+
+The service runs as the installing user from this project directory. Do not move
+the folder after installation. It uses one synchronous Gunicorn worker because
+the OpenCV objects and live recognition index are shared in memory. Do not
+increase the worker or thread count without changing that architecture.
+
+After updating the project or dependencies, rerun `bash install.sh`. It preserves
+settings and photos and restarts the service. Stop any manually started server
+using port 8000 before installing. Package installation requires binary wheels;
+if none are available, it stops instead of building OpenCV from source.
+
+## Manual server setup
 
 Create a Python environment and install the server dependencies:
 
