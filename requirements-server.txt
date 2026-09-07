@@ -2,3 +2,5 @@ flask
 numpy
 opencv-python-headless
 gunicorn
+Authlib
+requests

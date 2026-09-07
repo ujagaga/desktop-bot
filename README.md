@@ -30,7 +30,7 @@ The installer asks for sudo access for system packages and service setup. It:
 - Checks application startup, then installs and starts `face-recognition.service`
   and enables it at boot.
 
-Open `http://<pi-address>:8000` and read your login password from `appsettings.py`.
+Configure Google login as described below, then open the server in your browser.
 The webcam client runs separately; it is not installed as a service on the Pi.
 
 ```bash
@@ -76,12 +76,14 @@ Edit `appsettings.py` and set the following values:
 
 | Setting | Purpose |
 | --- | --- |
-| `PASSWORD` | Browser login password; no username is needed. |
+| `GOOGLE_CLIENT_SECRETS_FILE` | Google web OAuth credentials; defaults to `client_secret.json` beside `server.py`. |
+| `ALLOWED_EMAILS` | List of Google email addresses allowed to manage the library; empty denies everyone. |
+| `OAUTH_REDIRECT_URI` | Exact public callback URL, e.g. `https://faces.example.com/oauth2callback`. |
 | `API_KEY` | Shared client credential for recognition **and enrollment**. |
 | `SECRET_KEY` | Private random key for signing browser sessions. |
 | `COOKIE_SECURE` | Set to `True` when serving over HTTPS; keep `False` for local HTTP. |
 
-Use separate values for the password, API key, and session key. Generate random
+Use separate values for the API key and session key. Generate random
 values as needed with:
 
 ```bash
@@ -98,9 +100,37 @@ Open `http://localhost:8000` on the server, or `http://<pi-address>:8000` from
 another computer. The server listens on all interfaces on port 8000. Restart it
 after changing settings. Use HTTPS when accessing remotely.
 
+## Google login setup
+
+Copy your Google **Web application** OAuth `client_secret.json` directly into the
+project folder on the Pi. Set these values in its existing `appsettings.py`:
+
+```python
+ALLOWED_EMAILS = ["you@example.com"]
+GOOGLE_CLIENT_SECRETS_FILE = "client_secret.json"
+OAUTH_REDIRECT_URI = "https://faces.example.com/oauth2callback"
+COOKIE_SECURE = True
+```
+
+Use your actual HTTPS hostname, and add that exact callback URL to the client's
+**Authorized redirect URIs** in Google Cloud. A client shared with the printer
+server needs this additional redirect URI. Configure the Google consent screen
+and test users if the OAuth application is in testing mode. For local development,
+`http://localhost:8000/oauth2callback` can be used with `COOKIE_SECURE = False`.
+For access to the Pi from other computers, serve it through an HTTPS reverse proxy
+and set the explicit public `OAUTH_REDIRECT_URI` above.
+
+Run `bash install.sh` to install the new dependencies and restart the service.
+For subsequent credential or settings changes, restart `face-recognition.service`.
+Keep the credentials readable only by the service user (`chmod 600 client_secret.json`).
+Existing `API_KEY` and `SECRET_KEY` values are preserved; the old `PASSWORD` is
+unused and can be removed. Missing OAuth credentials leave the client API usable,
+but browser login remains unavailable until configured. Only verified Google
+emails in `ALLOWED_EMAILS` can access the library.
+
 ## Browser face library
 
-Log in with `PASSWORD` to manage the library:
+Log in with an authorized Google account to manage the library:
 
 - See known people, reference-photo counts, and saved-image thumbnails.
 - Click a thumbnail to view a larger image in the right-hand preview panel.
@@ -193,7 +223,7 @@ Browser enrollment instead uses a login session and the `csrf_token` form field.
 ## Local files and checks
 
 `.gitignore` excludes Python virtual environments, bytecode caches, the local
-`tests/` directory, `appsettings.py`, and downloaded ONNX model weights. Keep
+`tests/` directory, `appsettings.py`, `client_secret*.json`, and downloaded ONNX model weights. Keep
 `appsettings.example.py` as the shareable configuration template. Reference photos
 under `faces/` are not excluded by these rules.
 

@@ -58,10 +58,12 @@ import secrets
 path = pathlib.Path('appsettings.py')
 if not path.exists():
     content = ('"""Local server credentials. Keep private."""\n'
-               f'PASSWORD = "{secrets.token_urlsafe(18)}"\n'
                f'API_KEY = "{secrets.token_urlsafe(32)}"\n'
                f'SECRET_KEY = "{secrets.token_urlsafe(48)}"\n'
-               'COOKIE_SECURE = False\n')
+               'COOKIE_SECURE = False\n'
+               'GOOGLE_CLIENT_SECRETS_FILE = "client_secret.json"\n'
+               'ALLOWED_EMAILS = []\n'
+               'OAUTH_REDIRECT_URI = ""\n')
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as output:
         output.write(content)
@@ -71,7 +73,7 @@ PY
 echo "Checking credentials, models, and application startup..."
 as_user "$VENV_DIR/bin/python" - <<'PY'
 import appsettings
-for key in ('PASSWORD', 'API_KEY', 'SECRET_KEY'):
+for key in ('API_KEY', 'SECRET_KEY'):
     value = getattr(appsettings, key, None)
     if not isinstance(value, str) or not value:
         raise SystemExit(f'Set a nonempty {key} in appsettings.py, then rerun install.sh.')
@@ -127,7 +129,8 @@ if [[ "$READY" != true ]]; then
 fi
 
 echo "Installed and started $SERVICE_NAME; it will start automatically on boot."
-echo "Open http://<pi-address>:8000 and use the password in $APP_DIR/appsettings.py."
+echo "Copy client_secret.json into $APP_DIR and configure ALLOWED_EMAILS and OAUTH_REDIRECT_URI in appsettings.py."
+echo "Restart $SERVICE_NAME after configuring Google login. See README.md for HTTPS setup."
 echo "Logs: sudo journalctl -u $SERVICE_NAME -f"
 echo "Restart: sudo systemctl restart $SERVICE_NAME"
 echo "Keep this project at $APP_DIR: the service runs from this directory."

@@ -3,12 +3,8 @@
 {% block content %}
 <div class="login-layout">
 <div class="login-intro"><span class="eyebrow">YOUR FACE LIBRARY</span><h1>A little more<br>familiar.</h1><p>Keep the people your server knows in one place.<br>Add a face, browse saved photos, and make the next encounter a familiar one.</p><div class="login-decoration" aria-hidden="true"><span></span><span></span><span></span></div></div>
-<section class="panel login-panel"><span class="eyebrow">WELCOME BACK</span><h2>Log in to your library</h2><p class="muted">Enter your password to manage known faces.</p>
-<form method="post">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-  <label for="password">Password</label><input id="password" type="password" name="password" required autocomplete="current-password" autofocus placeholder="Enter your password">
+<section class="panel login-panel"><span class="eyebrow">WELCOME BACK</span><h2>Log in to your library</h2><p class="muted">Use your authorized Google account to manage known faces.</p>
   {% if error %}<p class="error-message" role="alert">{{ error }}</p>{% endif %}
-  <button class="primary login-submit" type="submit">Log in <span aria-hidden="true">→</span></button>
-</form>
+  <a class="primary login-submit" href="{{ url_for('google_login') }}">Continue with Google <span aria-hidden="true">→</span></a>
 </section></div>
 {% endblock %}

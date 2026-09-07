@@ -5,12 +5,13 @@
 Pipeline: YuNet detect -> 5-point align -> SFace embed -> cosine match.
 Known faces live in faces/<name>/*.jpg and are all matched together.
 
-GET  /          password-protected face list and upload form
+GET  /          Google-login-protected face list and upload form
 POST /recognize API key + image (raw body or multipart) -> recognized names
 POST /enroll    API key or login session + CSRF token, image + name -> enrollment
 """
 
 import io
+import json
 import pathlib
 import re
 import secrets
@@ -23,6 +24,7 @@ import appsettings
 
 import cv2
 import numpy as np
+from authlib.integrations.flask_client import OAuth
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for, abort, send_file
 
 MODELS = pathlib.Path(__file__).parent / "models"
@@ -106,8 +108,33 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=getattr(appsettings, "COOKIE_SECURE", False),
 )
-if not all((appsettings.PASSWORD, appsettings.API_KEY, appsettings.SECRET_KEY)):
-    raise RuntimeError("Configure PASSWORD, API_KEY, and SECRET_KEY in appsettings.py")
+if not all((appsettings.API_KEY, appsettings.SECRET_KEY)):
+    raise RuntimeError("Configure API_KEY and SECRET_KEY in appsettings.py")
+
+# Resolve relative paths against the project, independent of the working directory.
+secrets_path = pathlib.Path(getattr(appsettings, "GOOGLE_CLIENT_SECRETS_FILE", "client_secret.json"))
+if not secrets_path.is_absolute():
+    secrets_path = pathlib.Path(__file__).parent / secrets_path
+ALLOWED_EMAILS = {email.strip().casefold() for email in getattr(appsettings, "ALLOWED_EMAILS", [])}
+OAUTH_REDIRECT_URI = getattr(appsettings, "OAUTH_REDIRECT_URI", "")
+oauth = OAuth(app)
+google = None
+if secrets_path.is_file():
+    with secrets_path.open() as source:
+        credentials = json.load(source)["web"]
+    google = oauth.register(
+        name="google",
+        client_id=credentials["client_id"],
+        client_secret=credentials["client_secret"],
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+
+
+def logged_in():
+    user = session.get("user", {})
+    return bool(user.get("sub") and user.get("email") in ALLOWED_EMAILS)
+
 
 
 def csrf_token():
@@ -122,7 +149,7 @@ app.jinja_env.globals["csrf_token"] = csrf_token
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("logged_in"):
+        if not logged_in():
             if request.method == "GET":
                 return redirect(url_for("login"))
             return jsonify(error="login required"), 401
@@ -150,16 +177,46 @@ def too_large(error):
     return jsonify(error="image must be smaller than 10 MB"), 413
 
 
-@app.route("/login", methods=["GET", "POST"])
+@app.get("/login")
 def login():
+    if logged_in():
+        return redirect(url_for("index"))
     error = None
-    if request.method == "POST":
-        if compare_digest(request.form.get("password", "").encode(), appsettings.PASSWORD.encode()):
+    if google is None or not ALLOWED_EMAILS:
+        error = "Google login is not configured. Set up client_secret.json and ALLOWED_EMAILS on the server."
+    return render_template("login.html", error=error)
+
+
+@app.get("/auth/google")
+def google_login():
+    if google is None or not ALLOWED_EMAILS:
+        return render_template("login.html", error="Google login is not configured."), 503
+    session.clear()
+    return google.authorize_redirect(
+        OAUTH_REDIRECT_URI or url_for("oauth2callback", _external=True),
+        prompt="select_account",
+    )
+
+
+@app.get("/oauth2callback")
+def oauth2callback():
+    if google is None or not ALLOWED_EMAILS:
+        return render_template("login.html", error="Google login is not configured."), 503
+    try:
+        # Authlib validates OAuth state and the ID token's signature, issuer,
+        # audience, expiry and nonce before providing these identity claims.
+        token = google.authorize_access_token()
+        user = token.get("userinfo", {})
+        email = user.get("email", "").strip().casefold()
+        if not user.get("sub") or user.get("email_verified") is not True or email not in ALLOWED_EMAILS:
             session.clear()
-            session["logged_in"] = True
-            return redirect(url_for("index"))
-        error = "Incorrect password."
-    return render_template("login.html", error=error), 401 if error else 200
+            return render_template("login.html", error="This Google account is not authorized."), 403
+    except Exception:
+        session.clear()
+        return render_template("login.html", error="Google login failed. Please try again."), 400
+    session.clear()
+    session["user"] = {"sub": user["sub"], "email": email}
+    return redirect(url_for("index"))
 
 
 @app.post("/logout")
@@ -236,7 +293,7 @@ def recognize():
 @app.post("/enroll")
 def enroll():
     # API keys are validated above; browser uploads require a session and CSRF.
-    if "X-API-Key" not in request.headers and not session.get("logged_in"):
+    if "X-API-Key" not in request.headers and not logged_in():
         return jsonify(error="login or API key required"), 401
     name = request.form.get("name", "").strip()
     if not NAME_RE.fullmatch(name):

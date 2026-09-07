@@ -12,3 +12,6 @@ appsettings.py
 
 # Downloaded model weights
 models/*.onnx
+
+# Google OAuth credentials
+client_secret*.json
