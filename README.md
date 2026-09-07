@@ -4,6 +4,13 @@ A Python face recognition server intended for a Raspberry Pi 4, with a browser
 interface for managing known faces and a webcam client for recognition and enrollment.
 It uses OpenCV YuNet for face detection and SFace for recognition.
 
+## Project layout
+
+- `server/`: recognition API, Gemini gateway, settings, templates, models, and photos.
+- `client/`: webcam client and its private `clientsettings.py`.
+- `install.sh`: Pi installer entry point; runs `server/install.sh`.
+- `.venv-server/`: Pi server environment, kept at the project root for upgrades.
+
 ## Install as a Raspberry Pi service
 
 Use **64-bit Raspberry Pi OS (arm64)** with internet access and a normal user
@@ -20,11 +27,11 @@ bash install.sh
 The installer asks for sudo access for system packages and service setup. It:
 
 - Installs Python and required system libraries.
-- Creates `.venv-server/` and installs `requirements-server.txt` (including Gunicorn).
+- Creates `.venv-server/` and installs `server/requirements.txt` (including Gunicorn).
 - Downloads missing [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
   and [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface)
   model files from OpenCV Zoo.
-- Generates private credentials in `appsettings.py` if it does not exist.
+- Generates private credentials in `server/appsettings.py` if it does not exist.
   Existing credentials and face photos are preserved. Empty credentials must be
   filled in before installation can finish.
 - Checks application startup, then installs and starts `face-recognition.service`
@@ -51,6 +58,19 @@ settings and photos and restarts the service. Stop any manually started server
 using port 8000 before installing. Package installation requires binary wheels;
 if none are available, it stops instead of building OpenCV from source.
 
+### Upgrading an existing Pi installation
+
+Run the root `bash install.sh` after updating the project. It copies legacy root
+`appsettings.py`, `client_secret*.json`, `faces/`, and `models/` into `server/`
+without overwriting different destination files, and updates both systemd services
+to use `server/` as their working directory. The existing root `.venv-server/`
+is reused because virtual environments should not be moved.
+
+Original root files remain as a fallback; once services are verified, use only
+`server/appsettings.py` and `server/faces/`. If you configured a custom relative
+OAuth credential filename outside `client_secret*.json`, copy that file into the
+same relative location under `server/` before installing. Absolute paths still work.
+
 ## Manual server setup
 
 Create a Python environment and install the server dependencies:
@@ -58,10 +78,10 @@ Create a Python environment and install the server dependencies:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-server.txt
+pip install -r server/requirements.txt
 ```
 
-Place these model files in `models/` before starting the server:
+Place these model files in `server/models/` before starting the server:
 
 - `face_detection_yunet_2023mar.onnx`
 - `face_recognition_sface_2021dec.onnx`
@@ -69,10 +89,10 @@ Place these model files in `models/` before starting the server:
 If you do not already have local settings, copy the example:
 
 ```bash
-cp appsettings.example.py appsettings.py
+cp server/appsettings.example.py server/appsettings.py
 ```
 
-Edit `appsettings.py` and set the following values:
+Edit `server/appsettings.py` and set the following values:
 
 | Setting | Purpose |
 | --- | --- |
@@ -92,7 +112,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 Start the server:
 
 ```bash
-python server.py
+python server/server.py
 ```
 
 Open `http://localhost:8000` on the server, or `http://<pi-address>:8000` from
@@ -102,7 +122,7 @@ after changing settings. Use HTTPS when accessing remotely.
 ## Google login setup
 
 Copy your Google **Web application** OAuth `client_secret.json` directly into the
-project folder on the Pi. Set these values in its existing `appsettings.py`:
+`server/` folder on the Pi. Set these values in its existing `server/appsettings.py`:
 
 ```python
 ALLOWED_EMAILS = ["you@example.com"]
@@ -122,7 +142,7 @@ that preserves the original Host header. Localhost and 127.0.0.1 callbacks use H
 
 Run `bash install.sh` to install the new dependencies and restart the service.
 For subsequent credential or settings changes, restart `face-recognition.service`.
-Keep the credentials readable only by the service user (`chmod 600 client_secret.json`).
+Keep the credentials readable only by the service user (`chmod 600 server/client_secret.json`).
 Existing `API_KEY` and `SECRET_KEY` values are preserved; the old `PASSWORD` is
 unused and can be removed. Missing OAuth credentials leave the client API usable,
 but browser login remains unavailable until configured. Only verified Google
@@ -146,7 +166,7 @@ across restarts.
 Photos are grouped by person in a single library:
 
 ```text
-faces/
+server/faces/
 ├── Alex/
 │   ├── photo1.jpg
 │   └── photo2.jpg
@@ -168,10 +188,10 @@ while the server uses the headless package.
 ```bash
 python3 -m venv .venv-client
 source .venv-client/bin/activate
-pip install -r requirements-client.txt
+pip install -r client/requirements.txt
 ```
 
-Copy `clientsettings.example.py` to `clientsettings.py` beside `client.py`,
+Copy `client/clientsettings.example.py` to `client/clientsettings.py` beside `client.py`,
 then configure the full recognition URL and matching server API key:
 
 ```python
@@ -182,7 +202,7 @@ API_KEY = "your-server-api-key"
 Start the client:
 
 ```bash
-python client.py
+python client/client.py
 ```
 
 | Environment variable | Default | Purpose |
@@ -191,8 +211,8 @@ python client.py
 | `API_KEY` | `clientsettings.API_KEY` | Override the configured client key. |
 | `CAMERA` | `0` | Webcam device index. |
 
-Environment variables override `clientsettings.py` when needed. The client does
-not need server `appsettings.py` or Google OAuth credentials. `clientsettings.py`
+Environment variables override `client/clientsettings.py` when needed. The client does
+not need server `server/appsettings.py` or Google OAuth credentials. `client/clientsettings.py`
 is ignored by Git to keep your API key private.
 
 ### Recognition and enrollment
@@ -208,6 +228,13 @@ is ignored by Git to keep your API key private.
 
 If multiple people are detected, take another snapshot with just the person you
 want to enroll.
+
+## Gemini voice conversations
+
+The separate gateway on port 8001 connects an ESP32 microphone and speaker to
+Gemini Live, with optional face-recognition context. See [GEMINI.md](GEMINI.md)
+for API-key configuration, installation, the WebSocket protocol, and a smoke test.
+The installer also manages `face-conversation.service`.
 
 ## HTTP API
 
@@ -225,9 +252,9 @@ Browser enrollment instead uses a login session and the `csrf_token` form field.
 ## Local files and checks
 
 `.gitignore` excludes Python virtual environments, bytecode caches, the local
-`tests/` directory, `appsettings.py`, `clientsettings.py`, `client_secret*.json`, and downloaded ONNX model weights. Keep
-`appsettings.example.py` as the shareable configuration template. Reference photos
-under `faces/` are not excluded by these rules.
+`tests/` directory, `server/appsettings.py`, `client/clientsettings.py`, `client_secret*.json`, and downloaded ONNX model weights. Keep
+`server/appsettings.example.py` as the shareable configuration template. Reference photos
+under `server/faces/` are excluded to keep personal images private.
 
 If the local test directory is present, run checks in the server environment:
 

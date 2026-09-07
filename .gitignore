@@ -12,9 +12,11 @@ appsettings.py
 clientsettings.py
 
 # Downloaded model weights
-models/*.onnx
+**/models/*.onnx
 
 # Google OAuth credentials
 client_secret*.json
 
 faces
+
+server/.legacy-migrated
