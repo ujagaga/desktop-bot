@@ -27,7 +27,7 @@ def settings():
         'api_key': appsettings.API_KEY,
         'gemini_key': os.environ.get('GEMINI_API_KEY') or getattr(appsettings, 'GEMINI_API_KEY', ''),
         'model': getattr(appsettings, 'GEMINI_MODEL', 'gemini-3.1-flash-live-preview'),
-        'recognize_url': getattr(appsettings, 'RECOGNIZE_URL', 'http://127.0.0.1:8000/recognize'),
+        'recognize_url': getattr(appsettings, 'RECOGNIZE_URL', 'http://127.0.0.1:8040/recognize'),
         'max_sessions': getattr(appsettings, 'GEMINI_MAX_SESSIONS', 2),
         'instructions': getattr(appsettings, 'GEMINI_SYSTEM_INSTRUCTION',
             'You are a helpful desktop voice assistant. Keep spoken responses concise. '

@@ -9,5 +9,5 @@ ALLOWED_EMAILS = ["you@example.com"]
 GEMINI_API_KEY = ""
 GEMINI_MODEL = "gemini-3.1-flash-live-preview"
 GEMINI_MAX_SESSIONS = 2
-RECOGNIZE_URL = "http://127.0.0.1:8000/recognize"
+RECOGNIZE_URL = "http://127.0.0.1:8040/recognize"
 # Optional: GEMINI_SYSTEM_INSTRUCTION = "Your assistant instructions..."

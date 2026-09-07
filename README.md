@@ -55,7 +55,7 @@ increase the worker or thread count without changing that architecture.
 
 After updating the project or dependencies, rerun `bash install.sh`. It preserves
 settings and photos and restarts the service. Stop any manually started server
-using port 8000 before installing. Package installation requires binary wheels;
+using port 8040 before installing. Package installation requires binary wheels;
 if none are available, it stops instead of building OpenCV from source.
 
 ### Upgrading an existing Pi installation
@@ -115,8 +115,8 @@ Start the server:
 python server/server.py
 ```
 
-Open `http://localhost:8000` on the server, or `http://<pi-address>:8000` from
-another computer. The server listens on all interfaces on port 8000. Restart it
+Open `http://localhost:8040` on the server, or `http://<pi-address>:8040` from
+another computer. The server listens on all interfaces on port 8040. Restart it
 after changing settings. Use HTTPS when accessing remotely.
 
 ## Google login setup
@@ -135,7 +135,7 @@ like the printer server. Add that exact URL to the client's
 **Authorized redirect URIs** in Google Cloud. A client shared with the printer
 server needs this additional redirect URI. Configure the Google consent screen
 and test users if the OAuth application is in testing mode. For local development,
-`http://localhost:8000/oauth2callback` can be used with `COOKIE_SECURE = False`.
+`http://localhost:8040/oauth2callback` can be used with `COOKIE_SECURE = False`.
 For access to the Pi from other computers, serve it through an HTTPS reverse proxy
 that preserves the original Host header. Localhost and 127.0.0.1 callbacks use HTTP.
 `OAUTH_REDIRECT_URI` is no longer used and can be removed from existing settings.
@@ -195,7 +195,7 @@ Copy `client/clientsettings.example.py` to `client/clientsettings.py` beside `cl
 then configure the full recognition URL and matching server API key:
 
 ```python
-SERVER = "http://<pi-address>:8000/recognize"
+SERVER = "http://<pi-address>:8040/recognize"
 API_KEY = "your-server-api-key"
 ```
 

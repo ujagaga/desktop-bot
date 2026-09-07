@@ -103,7 +103,7 @@ Type=simple
 User=$SERVICE_USER
 WorkingDirectory=$APP_DIR
 Environment=PYTHONUNBUFFERED=1
-ExecStart=$VENV_DIR/bin/gunicorn --bind 0.0.0.0:8000 --workers 1 --worker-class sync --threads 1 --timeout 120 --access-logfile - --error-logfile - server:app
+ExecStart=$VENV_DIR/bin/gunicorn --bind 0.0.0.0:8040 --workers 1 --worker-class sync --threads 1 --timeout 120 --access-logfile - --error-logfile - server:app
 Restart=on-failure
 RestartSec=5
 UMask=0077
@@ -149,7 +149,7 @@ echo "Waiting for the server to respond..."
 READY=false
 for ((attempt = 0; attempt < 60; attempt++)); do
     if as_root systemctl is-active --quiet "$SERVICE_NAME" && \
-        curl --fail --silent --max-time 2 http://127.0.0.1:8000/login >/dev/null; then
+        curl --fail --silent --max-time 2 http://127.0.0.1:8040/login >/dev/null; then
         READY=true
         break
     fi

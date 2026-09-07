@@ -1,7 +1,7 @@
 # Gemini conversation gateway
 
 `server/conversation.py` is an asynchronous service on port **8041**, separate from the
-Flask/OpenCV server on port 8000. The ESP32 connects to the Pi; the Pi connects to
+Flask/OpenCV server on port 8040. The ESP32 connects to the Pi; the Pi connects to
 [Gemini Live](https://ai.google.dev/gemini-api/docs/live-api). Google browser OAuth
 credentials (`client_secret.json`) are unrelated to the Gemini API key.
 
@@ -13,7 +13,7 @@ Add to the existing private `server/appsettings.py`:
 GEMINI_API_KEY = "your-gemini-api-key"
 GEMINI_MODEL = "gemini-3.1-flash-live-preview"
 GEMINI_MAX_SESSIONS = 2
-RECOGNIZE_URL = "http://127.0.0.1:8000/recognize"
+RECOGNIZE_URL = "http://127.0.0.1:8040/recognize"
 ```
 
 The last three settings have those defaults. `GEMINI_SYSTEM_INSTRUCTION` can
@@ -37,7 +37,7 @@ running for snapshot recognition, but audio/text conversations work independentl
 Use WSS through your HTTPS reverse proxy outside a trusted local network. Route
 `/conversation` and `/health` to port 8041, forward `X-API-Key`, enable WebSocket
 Upgrade forwarding, and use an idle timeout longer than 60 seconds. Keep the
-existing browser and recognition routes on port 8000.
+existing browser and recognition routes on port 8040.
 
 ## Endpoints
 

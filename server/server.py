@@ -282,4 +282,4 @@ def enroll():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8000, threaded=False)
+    app.run(host="0.0.0.0", port=8040, threaded=False)
