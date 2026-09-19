@@ -72,14 +72,18 @@ void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
 
   tft.setTextSize(2);
   tft.setCursor(10, 20);
-  tft.printf("BAT %d%%  %.2fV", percent, voltage);
+  tft.print("FW ");
+  tft.print(FIRMWARE_VERSION);
 
   tft.setCursor(10, 55);
+  tft.printf("BAT %d%%  %.2fV", percent, voltage);
+
+  tft.setCursor(10, 90);
   tft.print("TIME ");
   tft.print((timeLabel != nullptr && timeLabel[0] != '\0') ? timeLabel : "unavailable");
 
   tft.setTextSize(2);
-  tft.setCursor(10, 90);
+  tft.setCursor(10, 125);
   if (wifiLabel != nullptr && wifiLabel[0] != '\0') {
     tft.print("WIFI ");
     tft.print(wifiLabel);
@@ -87,7 +91,7 @@ void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
     tft.print("WIFI disconnected");
   }
 
-  tft.setCursor(10, 160);
+  tft.setCursor(10, 195);
   if (ipLabel != nullptr && ipLabel[0] != '\0') {
     tft.print("IP ");
     tft.print(ipLabel);
@@ -95,9 +99,6 @@ void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
     tft.print("IP disconnected");
   }
 
-  tft.setCursor(10, 210);
-  tft.print("FW ");
-  tft.print(FIRMWARE_VERSION);
 }
 
 void LCD_ShowText(const char *text) {
