@@ -81,12 +81,14 @@ static bool cmdSleep(PortState *port, const char *args) {
   Serial.flush();
 
   LCD_BacklightOff();
+  WIFI_PrepareForSleep();
   uart_set_wakeup_threshold(UART_NUM_0, 3);
   esp_sleep_enable_uart_wakeup(UART_NUM_0);
   esp_light_sleep_start();
   LCD_BacklightRestore();
   CLOCK_ResetSync();
   GYRO_Init();
+  WIFI_RestoreAfterSleep();
   return true;
 }
 

@@ -23,6 +23,7 @@ static SPIClass lcdSPI(HSPI);
 static Adafruit_ST7789 tft(&lcdSPI, LCD_CS, LCD_DC, LCD_RST);
 static int currentBacklightPercent = BACKLIGHT_DEFAULT_PERCENT;
 static bool textMode = false;
+static int updatePercent = -1;
 
 static uint32_t dutyForPercent(int percent) {
   return ((1 << BACKLIGHT_RES_BITS) - 1) * percent / 100;
@@ -122,6 +123,45 @@ void LCD_ShowTime(const char *timeText, const char *dateText) {
   tft.setTextSize(2);
   tft.setCursor(10, 210);
   if (dateText != nullptr) tft.print(dateText);
+}
+
+void LCD_UpdateStatus(const char *status) {
+  tft.fillRect(10, 180, 220, 48, ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(12, 184);
+  tft.print(status);
+}
+
+void LCD_UpdateProgress(int percent) {
+  percent = constrain(percent, 0, 100);
+  if (percent == updatePercent) return;
+  updatePercent = percent;
+
+  // Only redraw the changing regions, avoiding a full-screen flash per chunk.
+  tft.fillRect(60, 92, 120, 28, ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(3);
+  tft.setCursor(84, 94);
+  tft.printf("%d%%", percent);
+  tft.fillRect(22, 137, 196, 22, ST77XX_BLACK);
+  if (percent > 0) tft.fillRect(22, 137, 196 * percent / 100, 22, ST77XX_CYAN);
+  if (percent == 100) LCD_UpdateStatus("Verifying...");
+}
+
+void LCD_UpdateBegin(unsigned long version) {
+  textMode = true;
+  updatePercent = -1;
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(30, 24);
+  tft.print("Firmware update");
+  tft.setCursor(12, 58);
+  tft.printf("Version %lu", version);
+  tft.drawRect(20, 135, 200, 26, ST77XX_WHITE);
+  LCD_UpdateProgress(0);
+  LCD_UpdateStatus("Connecting...");
 }
 
 Adafruit_GFX *LCD_GetGraphics() {

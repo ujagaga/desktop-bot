@@ -9,6 +9,7 @@
 #include "config.h"
 #include "firmware_version.h"
 #include "motor.h"
+#include "LCD.h"
 
 // Root certificate bundle supplied by the installed ESP32 Arduino core.
 extern const uint8_t bundleStart[] asm("_binary_x509_crt_bundle_start");
@@ -73,18 +74,27 @@ static bool checkRepository() {
   if (remoteVersion <= FIRMWARE_VERSION) return true;
 
   Serial.println("OTA: downloading newer firmware...");
+  LCD_UpdateBegin(remoteVersion);
   NetworkClientSecure client;
   configureTLS(client);
   HTTPUpdate updater(15000);
   updater.rebootOnUpdate(false);
+  updater.onStart([]() { LCD_UpdateStatus("Downloading..."); });
+  updater.onProgress([](int current, int total) {
+    if (total > 0) LCD_UpdateProgress((int)((uint64_t)current * 100 / total));
+  });
   // HTTPUpdate checks image headers and slot capacity, streams to the inactive
   // partition, and selects it for boot only after a complete, valid download.
   if (updater.update(client, base + "/build/ESP32_S3.ino.bin") != HTTP_UPDATE_OK) {
     Serial.printf("OTA: update failed: %s\n", updater.getLastErrorString().c_str());
+    LCD_UpdateStatus("Update failed");
     return false;
   }
   Serial.println("OTA: installed; restarting");
+  LCD_UpdateProgress(100);
+  LCD_UpdateStatus("Done. Restarting...");
   Serial.flush();
+  delay(1000);
   ESP.restart();
   return true;
 }

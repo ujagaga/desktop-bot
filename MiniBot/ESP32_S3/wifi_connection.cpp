@@ -7,6 +7,10 @@
 #define WIFI_SSID_KEY "ssid"
 #define WIFI_PASS_KEY "pass"
 
+static String activeSSID;
+static String activePassword;
+static bool restoreAfterSleep = false;
+
 bool WIFI_SaveCredentials(const char *ssid, const char *pass) {
   Preferences prefs;
   if (!prefs.begin(WIFI_NAMESPACE, false)) return false;
@@ -37,6 +41,8 @@ bool WIFI_LoadStoredCredentials(String &ssid, String &pass) {
 bool WIFI_Connect(const char *ssid, const char *pass, bool persist) {
   if (ssid == nullptr || *ssid == '\0' || pass == nullptr) return false;
 
+  activeSSID = ssid;
+  activePassword = pass;
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, pass);
 
@@ -59,9 +65,26 @@ void WIFI_Disconnect() {
   WiFi.mode(WIFI_OFF);
 }
 
+void WIFI_PrepareForSleep() {
+  // Preserve enabled/connecting state and current credentials, including ones
+  // that were not saved to Preferences. An explicitly disabled radio stays off.
+  restoreAfterSleep = (WiFi.getMode() & WIFI_STA) && !activeSSID.isEmpty();
+  WIFI_Disconnect();
+}
+
+void WIFI_RestoreAfterSleep() {
+  if (!restoreAfterSleep) return;
+  restoreAfterSleep = false;
+  WiFi.mode(WIFI_STA);
+  // Reconnect asynchronously so wake-up does not wait for the access point.
+  WiFi.begin(activeSSID.c_str(), activePassword.c_str());
+}
+
 void WIFI_Init() {
   String ssid, pass;
   if (WIFI_LoadStoredCredentials(ssid, pass)) {
+    activeSSID = ssid;
+    activePassword = pass;
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), pass.c_str());
   }

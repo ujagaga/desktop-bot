@@ -157,6 +157,11 @@ sleep
 
 Enters light sleep and wakes on activity on UART0. The LCD backlight is disabled during sleep and restored after wake. The gyro is reinitialized and calibrated after waking.
 
+Wi-Fi disconnects and the radio turns off before sleep. If Wi-Fi was enabled,
+the device reconnects to the same network asynchronously after waking, which
+also triggers a new firmware check. Wi-Fi that was explicitly turned off stays
+off. Sleep does not erase saved credentials.
+
 ## Firmware behavior
 
 - Battery status is sampled and refreshed approximately every two seconds in normal status mode.
@@ -216,7 +221,12 @@ the versions and any errors. There is no periodic check while continuously
 connected after the attempts finish.
 
 Motors stop before the blocking HTTP requests. Commands and display refreshes
-pause during the check/download. The updater validates the image and available
+pause during the check/download. When a newer version is found, the LCD clears
+and shows a dedicated firmware update screen with the target version, percentage,
+and progress bar. It shows connection, download, verification, and restart status.
+If the update fails, the failure message stays visible until another LCD command
+or update attempt replaces it; details are logged to Serial.
+The updater validates the image and available
 OTA slot capacity, then reboots after a successful installation. Failed downloads
 leave the current firmware selected. This does not provide automatic rollback
 if a successfully installed firmware later fails at runtime.

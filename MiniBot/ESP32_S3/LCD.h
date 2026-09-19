@@ -16,6 +16,11 @@ void LCD_ShowText(const char *text);
 // Shows a local time and weekday/date screen.
 void LCD_ShowTime(const char *timeText, const char *dateText);
 
+// Clear the display for OTA and suppress normal status refreshes.
+void LCD_UpdateBegin(unsigned long version);
+void LCD_UpdateProgress(int percent);
+void LCD_UpdateStatus(const char *status);
+
 // Returns whether custom text is currently shown instead of live status.
 bool LCD_IsTextMode();
 
