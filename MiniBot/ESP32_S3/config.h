@@ -2,6 +2,10 @@
 #define MINIBOT_CONFIG_H
 
 // Update before building a new firmware release.
-#define FIRMWARE_VERSION "0.1.0"
+#define FIRMWARE_VERSION 2
+
+#define OTA_GITHUB_REPOSITORY "ujagaga/desktop-bot"
+#define OTA_GITHUB_BRANCH "main"
+#define OTA_FIRMWARE_DIRECTORY "MiniBot/ESP32_S3"
 
 #endif

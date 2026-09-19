@@ -191,7 +191,8 @@ Close the serial monitor before uploading so it does not hold the serial port op
 ### Firmware version and OTA artifact
 
 Set `FIRMWARE_VERSION` in `ESP32_S3/config.h` before building a release. The
-initial version is `0.1.0`, and the LCD status screen displays it as `FW 0.1.0`.
+version is a positive integer, starting at `1`, and the LCD status screen displays
+it as `FW 1`. Increase it for each release (`2`, `3`, etc.).
 
 After running `tools/build_s3.sh`, commit the source changes together with
 `ESP32_S3/build/ESP32_S3.ino.bin`. This application binary is the only build
@@ -200,13 +201,37 @@ Bootloader, partition table, merged flash images, and other build outputs remain
 ignored. The application binary must fit within the current 1,310,720-byte OTA
 slot, and the device must already have a compatible partition layout.
 
-The firmware does not yet implement an OTA receiver; tracking this binary
-prepares the release artifact for that functionality.
+After each Wi-Fi connection, `http_client.cpp` checks the latest commit on
+`ujagaga/desktop-bot`, branch `main`. It reads `MiniBot/ESP32_S3/config.h` from
+that commit and, only when its integer version is higher than the running
+version, downloads `MiniBot/ESP32_S3/build/ESP32_S3.ino.bin` from the same commit.
+The repository, branch, and firmware directory are configured in `config.h`.
+The repository must be public; no GitHub credentials are stored on the device.
+
+HTTPS uses the ESP32 core's trusted root certificate bundle. The check waits
+up to three minutes for NTP time so certificates can be validated. Failed checks
+or downloads get up to three attempts, one minute apart; a new Wi-Fi connection
+starts a fresh check. An equal or older version is skipped. Serial output reports
+the versions and any errors. There is no periodic check while continuously
+connected after the attempts finish.
+
+Motors stop before the blocking HTTP requests. Commands and display refreshes
+pause during the check/download. The updater validates the image and available
+OTA slot capacity, then reboots after a successful installation. Failed downloads
+leave the current firmware selected. This does not provide automatic rollback
+if a successfully installed firmware later fails at runtime.
+
+For each release, increase the version, run `tools/build_s3.sh`, and commit and
+push the matching config, source, and application binary together. Do not publish
+a new version with an old binary. Devices running firmware without this OTA
+client need one initial USB upload using `tools/build_s3.sh upload`.
 
 ## Project structure
 
 - `ESP32_S3/ESP32_S3.ino`: firmware setup and main loop
 - `ESP32_S3/config.h`: firmware version
+- `ESP32_S3/http_client.cpp`: HTTPS GitHub version check and OTA download
+- `ESP32_S3/firmware_version.cpp`: strict integer version parser
 - `ESP32_S3/comms.cpp`: UART buffering and command dispatch
 - `ESP32_S3/LCD.cpp`: display, backlight, text, and status rendering
 - `ESP32_S3/faces.cpp`: geometric face renderer

@@ -7,11 +7,13 @@
 #include "motor.h"
 #include "wifi_connection.h"
 #include "clock.h"
+#include "http_client.h"
 
 
 void setup() {
   LCD_Init();
   COMMS_Init();
+  HTTP_CLIENT_Init();
   WIFI_Init();
   MOTOR_Init();
 }
@@ -21,4 +23,5 @@ void loop() {
   CLOCK_Process();
   BATT_process();
   MOTOR_Process();
+  HTTP_CLIENT_Process();
 }
