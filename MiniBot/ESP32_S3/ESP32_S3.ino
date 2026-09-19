@@ -6,6 +6,7 @@
 #include "comms.h"
 #include "motor.h"
 #include "wifi_connection.h"
+#include "clock.h"
 
 
 void setup() {
@@ -17,6 +18,7 @@ void setup() {
 
 void loop() {
   COMMS_Poll();
+  CLOCK_Process();
   BATT_process();
   MOTOR_Process();
 }

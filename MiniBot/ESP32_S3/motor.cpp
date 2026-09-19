@@ -48,6 +48,26 @@ void MOTOR_Run(int motor, bool forward, int pwmPercent, unsigned long durationMs
   motors[motor - 1].running = true;
 }
 
+void MOTOR_Set(int motor, bool forward, int pwmPercent) {
+  if (motor < 1 || motor > 2) return;
+  if (pwmPercent < 0) pwmPercent = 0;
+  if (pwmPercent > 100) pwmPercent = 100;
+
+  const MotorPins &pins = motorPins[motor - 1];
+  uint32_t duty = ((1 << MOTOR_PWM_RES_BITS) - 1) * pwmPercent / 100;
+  ledcWrite(pins.pinA, forward ? duty : 0);
+  ledcWrite(pins.pinB, forward ? 0 : duty);
+  motors[motor - 1].running = false;
+}
+
+void MOTOR_StopAll() {
+  for (int i = 0; i < 2; i++) {
+    ledcWrite(motorPins[i].pinA, 0);
+    ledcWrite(motorPins[i].pinB, 0);
+    motors[i].running = false;
+  }
+}
+
 void MOTOR_Process() {
   for (int i = 0; i < 2; i++) {
     if (motors[i].running && millis() - motors[i].startAt >= motors[i].durationMs) {

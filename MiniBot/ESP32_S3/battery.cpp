@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "battery.h"
 #include "LCD.h"
+#include "clock.h"
 
 
 // Battery: GPIO6, fed by an onboard 100K/100K divider off the battery rail,
@@ -33,24 +34,38 @@ int batteryPercent(float voltage) {
   return (int)(pct + 0.5f);
 }
 
+float BATT_GetVoltage() {
+  return readBatteryVoltage();
+}
+
+int BATT_GetPercent() {
+  return batteryPercent(readBatteryVoltage());
+}
+
+void BATT_ShowStatus() {
+  float voltage = readBatteryVoltage();
+  int percent = batteryPercent(voltage);
+
+  char wifiLabel[33] = "";
+  char ipLabel[16] = "";
+  char timeLabel[6] = "";
+  CLOCK_GetTimeText(timeLabel, sizeof(timeLabel));
+
+  if (WiFi.status() == WL_CONNECTED) {
+    const String ssid = WiFi.SSID();
+    const String ip = WiFi.localIP().toString();
+    snprintf(wifiLabel, sizeof(wifiLabel), "%s", ssid.c_str());
+    snprintf(ipLabel, sizeof(ipLabel), "%s", ip.c_str());
+  }
+
+  LCD_DrawBattery(voltage, percent, timeLabel,
+              (WiFi.status() == WL_CONNECTED) ? wifiLabel : nullptr,
+              (WiFi.status() == WL_CONNECTED) ? ipLabel : nullptr);
+}
+
 void BATT_process(){
   if(millis() - readTime > 2000){
-    float voltage = readBatteryVoltage();
-    int percent = batteryPercent(voltage);
-
-    char wifiLabel[33] = "";
-    char ipLabel[16] = "";
-
-    if (WiFi.status() == WL_CONNECTED) {
-      const String ssid = WiFi.SSID();
-      const String ip = WiFi.localIP().toString();
-      snprintf(wifiLabel, sizeof(wifiLabel), "%s", ssid.c_str());
-      snprintf(ipLabel, sizeof(ipLabel), "%s", ip.c_str());
-    }
-
-    LCD_DrawBattery(voltage, percent,
-                (WiFi.status() == WL_CONNECTED) ? wifiLabel : nullptr,
-                (WiFi.status() == WL_CONNECTED) ? ipLabel : nullptr);
+    BATT_ShowStatus();
     readTime = millis();
   }
 }

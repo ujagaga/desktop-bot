@@ -21,6 +21,7 @@
 static SPIClass lcdSPI(HSPI);
 static Adafruit_ST7789 tft(&lcdSPI, LCD_CS, LCD_DC, LCD_RST);
 static int currentBacklightPercent = BACKLIGHT_DEFAULT_PERCENT;
+static bool textMode = false;
 
 static uint32_t dutyForPercent(int percent) {
   return ((1 << BACKLIGHT_RES_BITS) - 1) * percent / 100;
@@ -56,13 +57,25 @@ void LCD_SetRotation(int rotation) {
   tft.setRotation(rotation);
 }
 
-void LCD_DrawBattery(float voltage, int percent, const char *wifiLabel, const char *ipLabel) {
+void LCD_Clear() {
+  tft.fillScreen(ST77XX_BLACK);
+  textMode = false;
+}
+
+void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
+                     const char *wifiLabel, const char *ipLabel) {
+  if (textMode) return;
+
   tft.fillScreen(ST77XX_BLACK);
   tft.setTextColor(ST77XX_WHITE);
 
   tft.setTextSize(2);
   tft.setCursor(10, 20);
   tft.printf("BAT %d%%  %.2fV", percent, voltage);
+
+  tft.setCursor(10, 55);
+  tft.print("TIME ");
+  tft.print((timeLabel != nullptr && timeLabel[0] != '\0') ? timeLabel : "unavailable");
 
   tft.setTextSize(2);
   tft.setCursor(10, 90);
@@ -80,4 +93,35 @@ void LCD_DrawBattery(float voltage, int percent, const char *wifiLabel, const ch
   } else {
     tft.print("IP disconnected");
   }
+}
+
+void LCD_ShowText(const char *text) {
+  textMode = true;
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+  tft.setTextSize(2);
+  tft.setCursor(0, 0);
+  if (text != nullptr) tft.print(text);
+}
+
+void LCD_ShowTime(const char *timeText, const char *dateText) {
+  textMode = true;
+  tft.fillScreen(ST77XX_BLACK);
+  tft.setTextColor(ST77XX_WHITE);
+
+  tft.setTextSize(5);
+  tft.setCursor(30, 62);
+  if (timeText != nullptr) tft.print(timeText);
+
+  tft.setTextSize(2);
+  tft.setCursor(10, 210);
+  if (dateText != nullptr) tft.print(dateText);
+}
+
+Adafruit_GFX *LCD_GetGraphics() {
+  return &tft;
+}
+
+bool LCD_IsTextMode() {
+  return textMode;
 }
