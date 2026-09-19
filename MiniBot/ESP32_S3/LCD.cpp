@@ -2,6 +2,7 @@
 #include <Adafruit_ST7789.h>
 #include <SPI.h>
 #include "LCD.h"
+#include "config.h"
 
 // LCD SPI: SCLK=40 MOSI=41 CS=39 DC=38 RST=42 (no MISO). Pins come from the
 // board schematic, not the datasheet, since they're fixed by the PCB traces.
@@ -93,6 +94,10 @@ void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
   } else {
     tft.print("IP disconnected");
   }
+
+  tft.setCursor(10, 210);
+  tft.print("FW ");
+  tft.print(FIRMWARE_VERSION);
 }
 
 void LCD_ShowText(const char *text) {

@@ -1,2 +1,3 @@
 .cache
-build
+/build/*
+!/build/ESP32_S3.ino.bin

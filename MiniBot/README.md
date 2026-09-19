@@ -66,7 +66,7 @@ time
 - `lcd bl` sets the backlight percentage.
 - `lcd clear` clears the screen and returns to normal status updates.
 - `lcd rotate` selects display rotation `0` through `3`.
-- `lcd status` shows battery percentage, voltage, current time, Wi-Fi SSID, and IP address.
+- `lcd status` shows battery percentage, voltage, current time, Wi-Fi SSID, IP address, and firmware version.
 - `lcd text` clears the screen and displays wrapped text. It remains visible until another LCD content command is used.
 - `lcd time` shows the synchronized local time as `HH:MM` and the weekday/date below it, for example `Saturday 19.09.`. Seconds are not displayed.
 - `time` prints the current `HH:MM` and weekday/date to the command console.
@@ -188,9 +188,25 @@ FQBN=esp32:esp32:esp32s3 PORT=/dev/ttyUSB0 tools/build_s3.sh upload
 
 Close the serial monitor before uploading so it does not hold the serial port open.
 
+### Firmware version and OTA artifact
+
+Set `FIRMWARE_VERSION` in `ESP32_S3/config.h` before building a release. The
+initial version is `0.1.0`, and the LCD status screen displays it as `FW 0.1.0`.
+
+After running `tools/build_s3.sh`, commit the source changes together with
+`ESP32_S3/build/ESP32_S3.ino.bin`. This application binary is the only build
+artifact tracked by Git and is the image to use for application OTA updates.
+Bootloader, partition table, merged flash images, and other build outputs remain
+ignored. The application binary must fit within the current 1,310,720-byte OTA
+slot, and the device must already have a compatible partition layout.
+
+The firmware does not yet implement an OTA receiver; tracking this binary
+prepares the release artifact for that functionality.
+
 ## Project structure
 
 - `ESP32_S3/ESP32_S3.ino`: firmware setup and main loop
+- `ESP32_S3/config.h`: firmware version
 - `ESP32_S3/comms.cpp`: UART buffering and command dispatch
 - `ESP32_S3/LCD.cpp`: display, backlight, text, and status rendering
 - `ESP32_S3/faces.cpp`: geometric face renderer
