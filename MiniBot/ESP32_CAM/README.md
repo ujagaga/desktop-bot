@@ -46,6 +46,21 @@ active after the timer stops. The address is cached in the atomic global
 section refreshes it automatically. The cached address lasts until reboot;
 discovery does not monitor subsequent S3 address changes.
 
+Open **S3 serial console** in the CAM UI to send commands such as `help`,
+`wifi ip` or `batt v`. Up/Down recalls the last ten commands stored in the
+browser. The console displays the last 4096 characters of UART traffic;
+`>` marks a transmitted command, `[poll] >` marks automatic discovery, and
+other text is received from the S3 (nonprintable bytes appear as `\xNN`).
+No reply is fabricated when the S3 is silent. Output is shared by all browsers
+and is cleared on CAM reboot.
+
+Opening the console pauses automatic IP requests; they resume 30 seconds
+after the last console read or manual send if no IP has been discovered.
+The console polls `GET /api/console` every half second while open and visible.
+`POST /api/console` accepts a plain-text ASCII command up to 127 bytes without
+CR/LF. HTTP 202 means queued, not acknowledged by the S3. The UART task owns
+all command writes and continues receiving independently of HTTP/camera work.
+
 The AP chooses a quiet channel among 1, 6 and 11 at startup. When the station
 connects, the ESP32's shared radio follows the station network's channel; AP
 clients may need to reconnect. Power saving is disabled for camera streaming.
@@ -85,7 +100,7 @@ The device's `/api` page also lists these endpoints.
 | GET | `/config?var=quality&val=12` | Apply a validated camera setting in RAM |
 | POST | `/api/camera/save` | Save current camera settings to Preferences |
 | GET | `/api/logs` | Recent timestamped log lines |
-| GET | `/api/info` | Firmware version, invalid target, OTA activity, free heap |
+| GET | `/api/info` | Firmware version, invalid target, OTA activity/state, discovered version, free heap |
 | GET | `/api/wifi` | Wi-Fi mode, configured SSID and addresses; no password |
 | POST | `/api/wifi` | Save/apply JSON Wi-Fi configuration |
 | POST | `/api/ota` | Queue a GitHub firmware check; empty body |
@@ -121,6 +136,15 @@ only when requested, not on each UI adjustment. These namespaces are independent
 of the S3 settings and survive normal application OTA. Erasing flash removes them.
 
 ## Build and firmware updates
+
+The UI shows the discovered firmware version and update state. Before stopping
+HTTP for installation, the updater leaves a five-second window for the browser
+to read that version. A separate JavaScript status poll uses a two-second request
+timeout, displays elapsed time and a retry countdown while offline, and retries
+every two seconds after a failed request. When the CAM returns, the entire page
+reloads, including after recovery from a failed download. Up-to-date, invalid,
+retry and failure states are also displayed. This requires installing the updated
+CAM firmware and loading its new UI first.
 
 Use the installed ESP32 Arduino core (tested with **3.3.10**) and `ArduinoJson`.
 The camera, Wi-Fi, HTTP, TLS and Preferences libraries are provided by the core.

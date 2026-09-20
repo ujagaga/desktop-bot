@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <limits.h>
 #include "camera.h"
+#include "comms.h"
 #include "config.h"
 #include "http_client.h"
 #include "logger.h"
@@ -84,11 +85,48 @@ static esp_err_t logsHandler(httpd_req_t *req) {
   LOG_get(buffer, LOG_CAPACITY);
   esp_err_t result = text(req, buffer); free(buffer); return result;
 }
+static esp_err_t consoleHandler(httpd_req_t *req) {
+  if (req->method == HTTP_GET) {
+    JsonDocument doc;
+    doc["ready"] = COMMS_IsReady();
+    doc["transcript"] = COMMS_ConsoleRead();
+    String value; serializeJson(doc, value); return json(req, value);
+  }
+  if (!req->content_len || req->content_len > 127)
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected one ASCII command, maximum 127 bytes");
+  char command[128]; size_t received = 0;
+  bool nonSpace = false;
+  while (received < req->content_len) {
+    int n = httpd_req_recv(req, command + received, req->content_len - received);
+    if (n <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Incomplete command body");
+    received += n;
+  }
+  for (size_t i = 0; i < received; ++i) {
+    if ((unsigned char)command[i] < 32 || (unsigned char)command[i] > 126)
+      return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected one printable ASCII command without CR/LF");
+    if (command[i] != ' ') nonSpace = true;
+  }
+  if (!nonSpace) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Empty command");
+  command[received] = 0;
+  if (!COMMS_IsReady()) {
+    httpd_resp_set_status(req, "503 Service Unavailable");
+    return text(req, "UART unavailable; see device log");
+  }
+  if (!COMMS_SendCommand(command)) {
+    httpd_resp_set_status(req, "409 Conflict");
+    return text(req, "UART command queue full; try again");
+  }
+  httpd_resp_set_status(req, "202 Accepted");
+  return text(req, "Queued for UART transmission; this does not confirm an S3 reply.");
+}
 static esp_err_t infoHandler(httpd_req_t *req) {
   JsonDocument doc;
   doc["version"] = FIRMWARE_VERSION;
   doc["invalid_version"] = HTTPC_invalidVersion();
   doc["ota_busy"] = HTTPC_fwUpdateInProgress();
+  doc["ota_pending"] = HTTPC_checkPending();
+  doc["ota_found_version"] = HTTPC_foundVersion();
+  doc["ota_status"] = HTTPC_updateStatus();
   doc["free_heap"] = ESP.getFreeHeap();
   String value; serializeJson(doc, value); return json(req, value);
 }
@@ -143,6 +181,8 @@ void HTTPSRV_init() {
     route(commands, "/capture", HTTP_GET, captureHandler);
     route(commands, "/api/camera/save", HTTP_POST, saveHandler);
     route(commands, "/api/logs", HTTP_GET, logsHandler);
+    route(commands, "/api/console", HTTP_GET, consoleHandler);
+    route(commands, "/api/console", HTTP_POST, consoleHandler);
     route(commands, "/api/info", HTTP_GET, infoHandler);
     route(commands, "/api/wifi", HTTP_GET, wifiHandler);
     route(commands, "/api/wifi", HTTP_POST, wifiHandler);

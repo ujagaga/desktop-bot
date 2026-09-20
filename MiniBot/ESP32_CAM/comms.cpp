@@ -4,11 +4,59 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/timers.h>
+#include <freertos/queue.h>
 
 std::atomic<uint32_t> COMMS_peerWifiIP{0};
 static std::atomic<bool> pollDue{true};
 static TimerHandle_t pollTimer = nullptr;
 static TaskHandle_t rxTask = nullptr;
+static QueueHandle_t commandQueue = nullptr;
+static std::atomic<uint32_t> consoleUntil{0};
+static portMUX_TYPE consoleMux = portMUX_INITIALIZER_UNLOCKED;
+static char transcript[4096];
+static size_t transcriptHead = 0, transcriptCount = 0;
+
+static void consoleAppend(const char *text) {
+  portENTER_CRITICAL(&consoleMux);
+  while (*text) {
+    transcript[transcriptHead] = *text++;
+    transcriptHead = (transcriptHead + 1) % sizeof(transcript);
+    if (transcriptCount < sizeof(transcript)) ++transcriptCount;
+  }
+  portEXIT_CRITICAL(&consoleMux);
+}
+
+bool COMMS_IsReady() { return rxTask != nullptr; }
+
+bool COMMS_SendCommand(const char *command) {
+  if (!COMMS_IsReady() || !command || !*command || strlen(command) > 127) return false;
+  bool nonSpace = false;
+  for (const char *p = command; *p; ++p) {
+    if ((unsigned char)*p < 32 || (unsigned char)*p > 126) return false;
+    if (*p != ' ') nonSpace = true;
+  }
+  if (!nonSpace) return false;
+  char queued[128] = {};
+  strcpy(queued, command);
+  consoleUntil.store(millis() + 30000);
+  return xQueueSend(commandQueue, queued, 0) == pdPASS;
+}
+
+String COMMS_ConsoleRead() {
+  consoleUntil.store(millis() + 30000);
+  // Allocate outside the critical section and off the HTTP task's stack.
+  char *snapshot = (char *)malloc(sizeof(transcript) + 1);
+  if (!snapshot) return String("ERR cannot allocate console snapshot\n");
+  portENTER_CRITICAL(&consoleMux);
+  size_t count = transcriptCount;
+  for (size_t i = 0; i < count; ++i)
+    snapshot[i] = transcript[(transcriptHead + sizeof(transcript) - count + i) % sizeof(transcript)];
+  portEXIT_CRITICAL(&consoleMux);
+  snapshot[count] = 0;
+  String result(snapshot);
+  free(snapshot);
+  return result;
+}
 
 // Accept only a complete dotted-decimal IPv4 line, never OK/ERR or log text.
 static uint32_t parseIP(const char *line) {
@@ -36,6 +84,12 @@ static void receiveTask(void *) {
     for (unsigned count = 0; count < 256 && Serial.available(); ++count) {
       int byte = Serial.read();
       if (byte < 0) break;
+      if (byte != '\r') {
+        char visible[5] = {};
+        if (byte == '\n' || byte == '\t' || (byte >= 32 && byte <= 126)) visible[0] = (char)byte;
+        else snprintf(visible, sizeof(visible), "\\x%02X", (unsigned)byte & 255U);
+        consoleAppend(visible);
+      }
       if (byte == '\r' || byte == '\n') {
         if (!discard && length && requested && !COMMS_peerWifiIP.load()) {
           line[length] = 0;
@@ -53,10 +107,22 @@ static void receiveTask(void *) {
         line[length++] = (char)byte;
       }
     }
+    char command[128];
+    if (xQueueReceive(commandQueue, command, 0) == pdPASS) {
+      consoleAppend("\n> ");
+      consoleAppend(command);
+      consoleAppend("\n");
+      Serial.print(command);
+      Serial.print("\n");
+    }
+    uint32_t until = consoleUntil.load();
+    bool consoleOpen = until && (int32_t)(millis() - until) < 0;
+    if (until && !consoleOpen) consoleUntil.compare_exchange_strong(until, 0);
     if (COMMS_peerWifiIP.load()) {
       // Retry a stop if the timer command queue was temporarily full.
       if (xTimerIsTimerActive(pollTimer)) xTimerStop(pollTimer, 0);
-    } else if (pollDue.exchange(false)) {
+    } else if (!consoleOpen && pollDue.exchange(false)) {
+      consoleAppend("\n[poll] > wifi ip\n");
       Serial.print("wifi ip\n");
       requested = true;
     }
@@ -66,6 +132,11 @@ static void receiveTask(void *) {
 
 bool COMMS_Init() {
   if (rxTask) return true;
+  if (!commandQueue) commandQueue = xQueueCreate(1, 128);
+  if (!commandQueue) {
+    LOG_append("ERR UART command queue allocation failed");
+    return false;
+  }
   Serial.setRxBufferSize(1024);
   Serial.begin(COMMS_BAUD, SERIAL_8N1, COMMS_RX_PIN, COMMS_TX_PIN);
   if (!Serial) {

@@ -1,5 +1,5 @@
 #pragma once
-#define FIRMWARE_VERSION 4
+#define FIRMWARE_VERSION 5
 // Standard CAM UART0: U0R/GPIO3 to S3 TX GPIO13, U0T/GPIO1 to S3 RX GPIO14.
 #define COMMS_RX_PIN 3
 #define COMMS_TX_PIN 1

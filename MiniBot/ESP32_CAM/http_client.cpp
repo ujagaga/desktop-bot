@@ -19,7 +19,9 @@ extern const uint8_t bundleStart[] asm("_binary_x509_crt_bundle_start");
 extern const uint8_t bundleEnd[] asm("_binary_x509_crt_bundle_end");
 
 static std::atomic<bool> connectedEvent{false};
-static bool pending = false;
+static std::atomic<bool> pending{false};
+static std::atomic<uint32_t> foundVersion{0};
+static std::atomic<const char *> updateStatus{"idle"};
 static std::atomic<bool> requested{false}, busy{false};
 static unsigned long nextAttempt = 0;
 static unsigned long connectedAt = 0;
@@ -83,6 +85,7 @@ static bool getText(const String &url, const char *accept, size_t limit, String 
 }
 
 static bool checkRepository() {
+  updateStatus.store("checking");
   LOG_append("OTA: checking GitHub firmware version");
   String commit;
   String api = String("https://api.github.com/repos/") + OTA_GITHUB_REPOSITORY +
@@ -105,14 +108,23 @@ static bool checkRepository() {
   }
   LOG_printf("OTA: device %lu, GitHub %lu\n", (unsigned long)FIRMWARE_VERSION,
                 (unsigned long)remoteVersion);
-  if (remoteVersion <= FIRMWARE_VERSION) return true;
+  foundVersion.store(remoteVersion);
+  if (remoteVersion <= FIRMWARE_VERSION) {
+    updateStatus.store("up_to_date");
+    return true;
+  }
   if (remoteVersion == invalidVersion) {
+    updateStatus.store("invalid");
     LOG_printf("OTA: version %lu is invalid; skipping repeated update\n",
                   (unsigned long)remoteVersion);
     return true;
   }
 
   LOG_append("OTA: downloading newer firmware...");
+  updateStatus.store("installing");
+  // Give the browser's independent status poll time to display the target
+  // before the HTTP servers go offline for the download/reboot.
+  delay(5000);
   // Stop and join HTTP handlers before deinitializing the camera.
   HTTPSRV_stop();
   CAM_Stop();
@@ -164,6 +176,8 @@ void HTTPC_process() {
   bool manual = requested.exchange(false);
   if (connected || manual) {
     pending = true;
+    foundVersion.store(0);
+    updateStatus.store("waiting");
     attempts = 0;
     nextAttempt = millis() + 1000;
     connectedAt = millis();
@@ -178,6 +192,7 @@ void HTTPC_process() {
     nextAttempt = millis() + 1000;
     if (millis() - connectedAt >= 180000) {
       pending = false;
+      updateStatus.store("time_unavailable");
       LOG_append("OTA: time unavailable; retry on next Wi-Fi connection");
     }
     return;
@@ -185,13 +200,22 @@ void HTTPC_process() {
   busy.store(true);
   bool done = checkRepository();
   busy.store(false);
-  if (done || ++attempts >= 3) pending = false;
-  else nextAttempt = millis() + 60000;
+  if (done) pending = false;
+  else if (++attempts >= 3) {
+    pending = false;
+    updateStatus.store("failed");
+  } else {
+    nextAttempt = millis() + 60000;
+    updateStatus.store("retry");
+  }
 }
 
 bool HTTPC_fwUpdateInProgress() { return busy.load(); }
+uint32_t HTTPC_foundVersion() { return foundVersion.load(); }
+const char *HTTPC_updateStatus() { return updateStatus.load(); }
+bool HTTPC_checkPending() { return pending.load() || requested.load(); }
 bool HTTPC_requestCheck() {
-  if (busy.load() || WiFi.status() != WL_CONNECTED) return false;
+  if (busy.load() || pending.load() || WiFi.status() != WL_CONNECTED) return false;
   bool expected = false;
   return requested.compare_exchange_strong(expected, true);
 }

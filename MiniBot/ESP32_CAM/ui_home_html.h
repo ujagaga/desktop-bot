@@ -21,6 +21,8 @@ button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}section,details{bac
 @media(max-width:900px){.camera-row{grid-template-columns:1fr;gap:12px}}
 pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{min-height:1.5em;color:#67d5ec}summary{cursor:pointer;font-size:1.2em}
 #wifi-form{display:grid;gap:12px;max-width:620px}
+#serial-form{display:flex;gap:8px}#serial-command{flex:1;min-width:0}
+#serial-output{height:260px;background:#111820;padding:12px;overflow-wrap:anywhere}
 #wifi-form label{display:grid;grid-template-columns:100px minmax(0,1fr);align-items:center;gap:16px;min-width:0}
 #wifi-form input,#wifi-form select{box-sizing:border-box;width:100%;min-width:0;margin:0}
 #wifi-form p{margin:0 0 0 116px;line-height:1.5;color:#bac5d1}
@@ -31,6 +33,7 @@ pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{
 <p><a href="/api">HTTP API</a> · <a href="/capture" target="_blank">Snapshot</a></p>
 <p id="message" role="status"></p>
 <section><button id="toggle-stream">Start preview</button><button id="check-ota">Check firmware</button>
+<p id="firmware-status" role="status" aria-live="polite"></p>
 <img id="preview" alt="Camera preview" hidden></section>
 <details open><summary>Camera settings</summary><fieldset id="camera-fields" disabled>
 <div id="camera-settings"></div><button id="save-camera">Save camera settings</button></fieldset>
@@ -40,10 +43,67 @@ pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{
 <label>SSID <input id="wifi-ssid" maxlength="32" autocomplete="off"></label>
 <label>Password <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password"></label>
 <button type="submit">Save Wi-Fi settings</button></form></section>
+<details id="serial-console"><summary>S3 serial console</summary>
+<p>Send commands to the S3 over UART. Try <code>help</code>, <code>wifi ip</code> or <code>batt v</code>. Up/Down recalls the last 10 commands.</p>
+<pre id="serial-output" role="log" aria-live="polite"></pre>
+<form id="serial-form"><input id="serial-command" aria-label="S3 command" placeholder="help" maxlength="127" autocomplete="off" required>
+<button id="serial-send" type="submit">Send</button></form>
+<p id="serial-status" role="status"></p>
+<small>Automatic IP polling pauses while this console is open. Incoming UART text appears above; a transmitted command does not confirm a reply. Recent output is shared across browsers.</small>
+</details>
 <section><h2>Device log</h2><pre id="logs"></pre></section>
 <script>
 const $=id=>document.getElementById(id);
 const message=text=>{$('message').textContent=text;};
+const serialHistoryKey='minibot.cam.s3CommandHistory';
+let serialHistory=[];
+try{const saved=JSON.parse(localStorage.getItem(serialHistoryKey)||'[]');
+  if(Array.isArray(saved))serialHistory=saved.filter(cmd=>typeof cmd==='string'&&cmd.trim()&&cmd.length<=127&&!/[^\x20-\x7e]/.test(cmd)).slice(-10);
+}catch(e){}
+let serialIndex=serialHistory.length,serialDraft='',serialReading=false;
+$('serial-command').onkeydown=event=>{
+  if(event.isComposing||!['ArrowUp','ArrowDown'].includes(event.key))return;
+  event.preventDefault();
+  if(!serialHistory.length)return;
+  if(event.key==='ArrowUp'){
+    if(serialIndex===serialHistory.length)serialDraft=event.target.value;
+    serialIndex=Math.max(0,serialIndex-1);
+  }else serialIndex=Math.min(serialHistory.length,serialIndex+1);
+  event.target.value=serialIndex===serialHistory.length?serialDraft:serialHistory[serialIndex];
+  event.target.setSelectionRange(event.target.value.length,event.target.value.length);
+};
+async function readSerial(){
+  if(!$('serial-console').open||serialReading||document.hidden)return;
+  serialReading=true;
+  try{const state=JSON.parse(await request('/api/console'));
+    const output=$('serial-output');
+    if(output.textContent!==state.transcript){
+      const atBottom=output.scrollHeight-output.scrollTop-output.clientHeight<30;
+      output.textContent=state.transcript;
+      if(atBottom)output.scrollTop=output.scrollHeight;
+    }
+    if(!state.ready)$('serial-status').textContent='UART unavailable; see device log.';
+  }catch(e){$('serial-status').textContent='Console read failed: '+e.message;}
+  finally{serialReading=false;}
+}
+$('serial-console').ontoggle=()=>{if($('serial-console').open)readSerial();};
+setInterval(readSerial,500);
+$('serial-form').onsubmit=async event=>{
+  event.preventDefault();
+  const input=$('serial-command'),send=$('serial-send'),command=input.value;
+  if(input.disabled)return;
+  if(!command.trim()||command.length>127||/[^\x20-\x7e]/.test(command)){
+    $('serial-status').textContent='Enter one printable ASCII command, maximum 127 characters.';return;
+  }
+  input.disabled=send.disabled=true;
+  try{
+    $('serial-status').textContent=await request('/api/console',{method:'POST',headers:{'Content-Type':'text/plain'},body:command});
+    serialHistory.push(command);serialHistory=serialHistory.slice(-10);serialIndex=serialHistory.length;serialDraft='';
+    try{localStorage.setItem(serialHistoryKey,JSON.stringify(serialHistory));}catch(e){}
+    input.value='';await readSerial();
+  }catch(e){$('serial-status').textContent='Send failed: '+e.message+' The command may have been sent; check output before retrying.';}
+  finally{input.disabled=send.disabled=false;input.focus();}
+};
 async function request(path,options={}) {
   const response=await fetch(path,{...options,signal:AbortSignal.timeout(15000)});
   const body=await response.text();
@@ -120,7 +180,59 @@ $('toggle-stream').onclick=()=>{
 };
 $('preview').onerror=()=>{stopPreview();message('Preview stopped. Retry after the camera or firmware update is ready.');};
 $('save-camera').onclick=async()=>{try{message(await request('/api/camera/save',{method:'POST'}));}catch(e){message(e.message);}};
-$('check-ota').onclick=async()=>{try{stopPreview();message(await request('/api/ota',{method:'POST'}));}catch(e){message(e.message);}};
+const firmware={phase:'idle',found:0,version:null,started:null,offline:false,installing:false,posting:false,nextCheck:0,probing:false,reloading:false};
+function renderFirmwareStatus(){
+  const labels={idle:'',waiting:'Waiting for network time…',checking:'Checking firmware…',installing:'Installing firmware; the CAM will restart…',up_to_date:'Firmware is up to date.',invalid:'The discovered version is marked invalid; update skipped.',retry:'Update attempt failed; automatic retry in about a minute. See device log.',failed:'Firmware update failed. See device log.',time_unavailable:'Network time unavailable; firmware check stopped.'};
+  const elapsed=firmware.started===null?'':' · '+Math.floor((Date.now()-firmware.started)/1000)+'s elapsed';
+  const found=firmware.found?'Found V'+firmware.found+' · ':'';
+  if(firmware.offline){
+    const retry=firmware.probing?'Checking connection…':'Retrying in '+Math.max(0,Math.ceil((firmware.nextCheck-Date.now())/1000))+'s…';
+    $('firmware-status').textContent=found+'CAM offline; waiting for it to return'+elapsed+'. '+retry;
+  }else $('firmware-status').textContent=found+(labels[firmware.phase]||'Checking firmware…')+(['waiting','checking','installing','retry'].includes(firmware.phase)?elapsed:'');
+}
+async function checkFirmwareStatus(){
+  if(firmware.reloading)return;
+  firmware.probing=true;
+  try{
+    // Independent of logs/camera requests, with a short timeout during reboot.
+    const response=await fetch('/api/info',{cache:'no-store',signal:AbortSignal.timeout(2000)});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const info=await response.json();
+    if(!Number.isInteger(info.version))throw new Error('Invalid firmware status');
+    if((firmware.version!==null&&info.version!==firmware.version)||
+       ((firmware.offline||firmware.installing)&&!info.ota_busy&&info.ota_status!=='installing')){
+      firmware.reloading=true;
+      $('firmware-status').textContent='CAM is back on V'+info.version+'. Reloading…';
+      location.reload();return;
+    }
+    firmware.version=info.version;
+    firmware.offline=false;
+    firmware.found=info.ota_found_version||firmware.found;
+    firmware.phase=info.ota_status||'idle';
+    if(info.ota_pending&&['idle','up_to_date','failed','invalid','time_unavailable'].includes(firmware.phase))firmware.phase='waiting';
+    if(firmware.phase==='installing'){firmware.installing=true;stopPreview();}
+    const active=!!(info.ota_busy||info.ota_pending);
+    if(active&&firmware.started===null)firmware.started=Date.now();
+    $('check-ota').disabled=active||firmware.posting;
+    $('info').textContent='V'+info.version+(info.invalid_version?' — invalid target V'+info.invalid_version:'');
+  }catch(e){
+    firmware.offline=true;
+    if(firmware.started===null)firmware.started=Date.now();
+    $('check-ota').disabled=true;
+  }finally{
+    firmware.probing=false;
+    firmware.nextCheck=Date.now()+(firmware.offline?2000:1000);
+    if(!firmware.reloading){renderFirmwareStatus();setTimeout(checkFirmwareStatus,firmware.offline?2000:1000);}
+  }
+}
+setInterval(()=>{if(!firmware.reloading)renderFirmwareStatus();},1000);
+$('check-ota').onclick=async()=>{
+  stopPreview();firmware.started=Date.now();firmware.found=0;firmware.phase='waiting';firmware.posting=true;
+  $('check-ota').disabled=true;renderFirmwareStatus();
+  try{message(await request('/api/ota',{method:'POST'}));}
+  catch(e){message('Firmware check request: '+e.message);}
+  finally{firmware.posting=false;}
+};
 $('wifi-form').onsubmit=async event=>{
   event.preventDefault();
   try{message(await request('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:$('wifi-mode').value,ssid:$('wifi-ssid').value,password:$('wifi-pass').value})}));$('wifi-pass').value='';}
@@ -133,13 +245,12 @@ async function loadWifi(){try{const state=JSON.parse(await request('/api/wifi'))
 }catch(e){message(e.message);}}
 let offline=false;
 async function poll(){
+  if(firmware.offline||firmware.phase==='installing'){setTimeout(poll,2000);return;}
   try{const text=await request('/api/logs');if($('logs').textContent!==text){$('logs').textContent=text;$('logs').scrollTop=$('logs').scrollHeight;}
-    const info=JSON.parse(await request('/api/info'));
-    $('info').textContent='V'+info.version+(info.invalid_version?' — invalid target V'+info.invalid_version:'');
     showWifi(JSON.parse(await request('/api/wifi')));
     if(offline){loadCamera();loadWifi();}offline=false;
-  }catch(e){offline=true;$('info').textContent='— reconnecting…';}
+  }catch(e){offline=true;}
   setTimeout(poll,2000);
 }
-loadCamera();loadWifi();poll();
+checkFirmwareStatus();loadCamera();loadWifi();poll();
 </script></body></html>)HTML";
