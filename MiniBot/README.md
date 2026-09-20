@@ -52,6 +52,9 @@ Sleep is coordinated with the CAM: S3 shows `08_sleepy`, drives GPIO7 LOW,
 sends `sleep`, and waits up to ten seconds for `CAM SLEEP READY`. It keeps the
 face visible for at least three seconds before turning off the display and
 entering light sleep. Missing/rejected acknowledgment cancels S3 sleep.
+CAM refuses sleep while an HTTP/stream or setup-AP client is connected, with a
+five-second grace period after HTTP disconnects. S3 shows `00_neutral` when CAM
+refuses or its acknowledgment times out, keeping the screen on.
 GPIO7 is held LOW during sleep and raised HIGH on confirmed wake or cancellation,
 waking CAM GPIO13 from deep sleep. Connect common ground and a 10 kΩ pull-down
 on CAM GPIO13. S3 then restores its status screen and rediscovers the CAM IP.
@@ -228,7 +231,29 @@ over arbitrary durations. Keep the robot still during calibration.
 ```text
 motor move <0|1|2> <FWD|BACK> <pwm> <ms>
 motor rotate <pwm> <angle>
+motor calibrate <1|2> <percent>
+motor calibrate 0 <duration in seconds>
 ```
+
+`motor calibrate` sets a per-motor PWM multiplier from `0` to `100`, saved in
+Preferences namespace `motorCal` (keys `motor1` and `motor2`). Both default to
+100%. For example, `motor calibrate 1 80` makes a subsequent 100% request use
+80% PWM on motor 1; a 50% request uses 40%. Motor 2 keeps its own multiplier.
+Calibration applies to forward/reverse moves and rotations, starting with the
+next motor command. Set 100 to restore full output or 0 to suppress that motor's
+output. Invalid arguments or a failed save leave the previous setting unchanged.
+`motor calibrate 0 <seconds>` performs an automatic straight-line calibration.
+It runs both motors forward at 30% for the requested 1–60 seconds while
+integrating the gyro X angle. Motor 1 is treated as the left motor and motor 2
+as the right motor; with this robot's convention, positive X rotation means
+motor 1 is stronger and negative X rotation means motor 2 is stronger. The
+identified stronger motor is reduced while the weaker motor remains unchanged.
+The correction is proportional to the measured X rotation rate, capped at a
+50% reduction per run, and is saved to Preferences. Run the command again if
+the first correction is not sufficient. Stop the robot before starting the
+command and keep it on a surface where both wheels can move freely.
+This trims PWM output; actual wheel speed and straightness depend on the motors
+and load. Tune the faster motor downward to match the slower one.
 
 ID `1` or `2` selects one motor. ID `0` runs both motors. `pwm` is clamped to `0-100`. The motor stops automatically after the requested duration.
 `motor rotate` drives both motors in opposite directions until the requested relative gyro angle is reached on the configured axis. The default axis is Z. The current convention is motor 1 forward and motor 2 backward for positive rotation. The axis and direction settings are defined in `ESP32_S3/motor.h` so they can be changed if testing shows they are wrong. The command reverses at reduced power to correct a small overshoot and has a 15-second safety timeout.

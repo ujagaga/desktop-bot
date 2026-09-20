@@ -52,8 +52,8 @@ actively monitored.
 IPv4 argument. Every valid report replaces the stored S3 address; `0.0.0.0`
 clears it. Invalid requests return `ERR report ip <s3 ip addr>` without changing
 the cache. `COMMS_GetPeerWifiIP()` provides a thread-safe snapshot exposed as
-`s3_ip` by `GET /api/wifi` and refreshed in the UI. The standalone `wifi ip`
-command remains available for manual diagnostics but is not used for discovery.
+`s3_ip` by `GET /api/wifi` and refreshed in the UI. CAM does not handle `wifi ip`; IP exchange uses only `report ip`.
+Indented S3 help entries are ignored by the CAM parser, including `sleep`.
 Other incoming lines remain console replies and are not answered, preventing
 command/reply feedback loops. Both modules need the matching firmware changes.
 
@@ -83,6 +83,12 @@ confirmed wake, on cancelled sleep, and at startup.
 S3 displays face `08_sleepy`, sends `sleep`, and waits up to ten seconds for
 the explicit `CAM SLEEP READY` reply. A plain `OK` is not a sleep acknowledgment.
 CAM rejects sleep during firmware installation or while the wake line is HIGH.
+It also refuses with `ERR CAM SLEEP client connected` while a client is attached
+to the setup AP, either HTTP server has an open connection (including streaming),
+or fewer than five seconds have passed since the last HTTP connection closed.
+The grace period covers gaps between UI polls. Once sleep is accepted, new HTTP
+connections are rejected so they cannot race shutdown. On refusal S3 stays awake
+and replaces the sleepy face with `00_neutral`.
 Its RX task queues the request; the main loop stops HTTP, the camera and Wi-Fi,
 holds the sensor power-down pin HIGH, then acknowledges and enters deep sleep.
 GPIO13 HIGH wakes CAM through EXT0 and restarts the firmware from setup.
@@ -123,7 +129,8 @@ can deinitialize the camera.
 
 ## HTTP API
 
-The device's `/api` page also lists these endpoints.
+Only endpoints used by the home page are registered. There is no separate
+API documentation page.
 
 | Method | Path | Result |
 | --- | --- | --- |
@@ -134,6 +141,8 @@ The device's `/api` page also lists these endpoints.
 | GET | `/config?var=quality&val=12` | Apply a validated camera setting in RAM |
 | POST | `/api/camera/save` | Save current camera settings to Preferences |
 | GET | `/api/logs` | Recent timestamped log lines |
+| GET | `/api/console` | UART readiness and recent TX/RX transcript |
+| POST | `/api/console` | Queue a plain-text S3 command from the home-page console |
 | GET | `/api/info` | Firmware version, invalid target, OTA activity/state, discovered version, free heap |
 | GET | `/api/wifi` | Wi-Fi mode, configured SSID and addresses; no password |
 | POST | `/api/wifi` | Save/apply JSON Wi-Fi configuration |

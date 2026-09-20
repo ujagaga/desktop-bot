@@ -80,6 +80,8 @@ static bool parseIP(const char *line, uint32_t &address) {
 // Dispatch recognized command families only: other lines may be replies to
 // commands sent from the console, so never answer them with another error.
 static bool dispatchCommand(const char *line) {
+  // S3 help entries are indented text, including "sleep", not requests.
+  if (*line == ' ' || *line == '\t') return false;
   char command[16], argument[16], addressText[16], extra[2];
   int fields = sscanf(line, "%15s %15s %15s %1s", command, argument, addressText, extra);
   if (fields < 1) return false;
@@ -107,19 +109,7 @@ static bool dispatchCommand(const char *line) {
     consoleAppend("\nOK\n");
     return true;
   }
-  if (strcasecmp(command, "wifi")) return false;
-  if (fields == 2 && !strcasecmp(argument, "ip")) {
-    String address = (WiFi.status() == WL_CONNECTED ? WiFi.localIP() : IPAddress(0, 0, 0, 0)).toString();
-    Serial.println(address);
-    Serial.println("OK");
-    consoleAppend("\n[reply] ");
-    consoleAppend(address.c_str());
-    consoleAppend("\nOK\n");
-  } else {
-    Serial.println("ERR wifi <ip>");
-    consoleAppend("\n[reply] ERR wifi <ip>\n");
-  }
-  return true;
+  return false;
 }
 
 static void receiveTask(void *) {
@@ -215,6 +205,13 @@ void COMMS_ProcessSleep() {
   if (HTTPC_fwUpdateInProgress() || digitalRead(CAM_WAKE_GPIO) ||
       esp_sleep_enable_ext0_wakeup(wakePin, 1) != ESP_OK) {
     Serial.println("ERR CAM SLEEP unavailable or wake line HIGH");
+    sleepRequested.store(false);
+    return;
+  }
+  if (!HTTPSRV_PrepareSleep()) {
+    Serial.println("ERR CAM SLEEP client connected");
+    consoleAppend("\n[reply] ERR CAM SLEEP client connected\n");
+    LOG_append("CAM sleep refused: client connected");
     sleepRequested.store(false);
     return;
   }

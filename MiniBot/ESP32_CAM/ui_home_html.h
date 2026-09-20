@@ -7,6 +7,10 @@ body{font-family:system-ui,sans-serif;background:#161b22;color:#e6edf3;max-width
 a{color:#67d5ec}button,input,select{font:inherit;padding:8px;border-radius:5px;margin:4px;background:#263241;color:#fff;border:1px solid #586574}
 button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}section,details{background:#202832;padding:16px;border-radius:8px;margin:16px 0}
 #preview{display:block;max-width:100%;max-height:65vh;margin:auto}
+#preview[hidden]{display:none}
+#drive-preview{display:grid;grid-template-columns:48px minmax(0,1fr) 48px;align-items:center;gap:12px}
+#drive-controls,#rotate-controls{display:grid;gap:8px}
+#drive-controls button,#rotate-controls button{width:48px;height:48px;margin:0;padding:0;font-size:30px;line-height:1;touch-action:manipulation}
 #camera-fields{min-width:0;margin:12px 0;padding:0;border:0}
 #camera-settings{margin-bottom:16px}
 .camera-group{padding:12px;border:1px solid #394552;border-radius:6px;margin-top:8px;background:#202832}
@@ -30,11 +34,15 @@ pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{
 @media(max-width:480px){#wifi-form label{grid-template-columns:1fr;gap:6px}#wifi-form p,#wifi-form button{margin-left:0}}
 </style></head><body>
 <h1>MiniBot CAM <small id="info"></small></h1>
-<p><a href="/api">HTTP API</a> · <a href="/capture" target="_blank">Snapshot</a></p>
+<p><a href="/capture" target="_blank">Snapshot</a></p>
 <p id="message" role="status"></p>
 <section><button id="toggle-stream">Start preview</button><button id="check-ota">Check firmware</button>
 <p id="firmware-status" role="status" aria-live="polite"></p>
-<img id="preview" alt="Camera preview" hidden></section>
+<div id="drive-preview"><div id="drive-controls"><button id="move-forward" type="button" aria-label="Move forward" title="Move forward"><span aria-hidden="true">↑</span></button>
+<button id="move-back" type="button" aria-label="Move backward" title="Move backward"><span aria-hidden="true">↓</span></button></div>
+<div><img id="preview" alt="Camera preview" hidden></div>
+<div id="rotate-controls"><button id="rotate-left" type="button" aria-label="Rotate left 10 degrees" title="Rotate left 10°"><span aria-hidden="true">↶</span></button>
+<button id="rotate-right" type="button" aria-label="Rotate right 10 degrees" title="Rotate right 10°"><span aria-hidden="true">↷</span></button></div></div></section>
 <details open><summary>Camera settings</summary><fieldset id="camera-fields" disabled>
 <div id="camera-settings"></div><button id="save-camera">Save camera settings</button></fieldset>
 <p>Changes apply immediately. Save to keep them after restart. Lower JPEG quality numbers give better image quality and larger frames.</p></details>
@@ -179,6 +187,21 @@ $('toggle-stream').onclick=()=>{
   $('preview').src=url.href;$('preview').hidden=false;streaming=true;$('toggle-stream').textContent='Stop preview';
 };
 $('preview').onerror=()=>{stopPreview();message('Preview stopped. Retry after the camera or firmware update is ready.');};
+const driveActions=[['move-forward','motor move 0 FWD 50 500','Forward movement'],['move-back','motor move 0 BACK 50 500','Backward movement'],
+  ['rotate-left','motor rotate 50 10','Left rotation'],['rotate-right','motor rotate 50 -10','Right rotation']];
+for(const [id,command,label] of driveActions){
+  $(id).onclick=async()=>{
+    const buttons=driveActions.map(([id])=>$(id));
+    if(buttons.some(button=>button.disabled))return;
+    buttons.forEach(button=>button.disabled=true);
+    try{
+      await request('/api/console',{method:'POST',headers:{'Content-Type':'text/plain'},body:command});
+      message(label+' requested.');
+      await new Promise(resolve=>setTimeout(resolve,500));
+    }catch(e){message('Could not confirm '+label.toLowerCase()+' request: '+e.message);}
+    finally{buttons.forEach(button=>button.disabled=false);}
+  };
+}
 $('save-camera').onclick=async()=>{try{message(await request('/api/camera/save',{method:'POST'}));}catch(e){message(e.message);}};
 const firmware={phase:'idle',found:0,version:null,started:null,offline:false,installing:false,posting:false,nextCheck:0,probing:false,reloading:false};
 function renderFirmwareStatus(){

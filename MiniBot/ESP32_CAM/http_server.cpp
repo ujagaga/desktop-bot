@@ -4,6 +4,8 @@
 #include <atomic>
 #include <errno.h>
 #include <limits.h>
+#include <WiFi.h>
+#include <unistd.h>
 #include "camera.h"
 #include "comms.h"
 #include "config.h"
@@ -11,9 +13,47 @@
 #include "logger.h"
 #include "wifi_connection.h"
 #include "ui_home_html.h"
-#include "ui_api_html.h"
 static httpd_handle_t commands = nullptr, stream = nullptr;
 static std::atomic<bool> stopping{false};
+static portMUX_TYPE clientMux = portMUX_INITIALIZER_UNLOCKED;
+struct ClientSocket { int fd = -1; };
+static ClientSocket clients[32]; // Shared by the UI and stream servers.
+static bool sleepReserved = false, hadClient = false;
+static uint32_t lastClientClosed = 0;
+static esp_err_t clientOpened(httpd_handle_t, int fd) {
+  esp_err_t result = ESP_FAIL;
+  portENTER_CRITICAL(&clientMux);
+  if (!sleepReserved) for (auto &client : clients) {
+    if (client.fd < 0) {
+      client.fd = fd;
+      hadClient = true;
+      result = ESP_OK;
+      break;
+    }
+  }
+  portEXIT_CRITICAL(&clientMux);
+  return result;
+}
+static void clientClosed(httpd_handle_t, int fd) {
+  portENTER_CRITICAL(&clientMux);
+  for (auto &client : clients) if (client.fd == fd) {
+    client.fd = -1;
+    lastClientClosed = millis();
+    break;
+  }
+  portEXIT_CRITICAL(&clientMux);
+  // A custom close callback owns closing the socket, including rejected opens.
+  close(fd);
+}
+bool HTTPSRV_PrepareSleep() {
+  if (WiFi.softAPgetStationNum()) return false;
+  portENTER_CRITICAL(&clientMux);
+  bool connected = hadClient && millis() - lastClientClosed < 5000;
+  for (const auto &client : clients) if (client.fd >= 0) connected = true;
+  if (!connected) sleepReserved = true;
+  portEXIT_CRITICAL(&clientMux);
+  return !connected;
+}
 static esp_err_t text(httpd_req_t *req, const char *value) {
   httpd_resp_set_type(req, "text/plain");
   httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -29,12 +69,8 @@ static esp_err_t unavailable(httpd_req_t *req) {
   return text(req, "Camera unavailable; see logs");
 }
 static esp_err_t indexHandler(httpd_req_t *req) {
-  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_type(req, "text/html; charset=utf-8");
   return httpd_resp_send(req, index_html, HTTPD_RESP_USE_STRLEN);
-}
-static esp_err_t apiHandler(httpd_req_t *req) {
-  httpd_resp_set_type(req, "text/html");
-  return httpd_resp_send(req, api_html, HTTPD_RESP_USE_STRLEN);
 }
 static esp_err_t captureHandler(httpd_req_t *req) {
   camera_fb_t *frame = CAM_Capture();
@@ -168,14 +204,18 @@ void HTTPSRV_stop() {
 }
 void HTTPSRV_init() {
   if (commands || stream) return;
+  portENTER_CRITICAL(&clientMux);
+  sleepReserved = false;
+  portEXIT_CRITICAL(&clientMux);
   stopping.store(false);
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-  config.max_uri_handlers = 14; config.stack_size = 8192;
+  config.open_fn = clientOpened;
+  config.close_fn = clientClosed;
+  config.max_uri_handlers = 12; config.stack_size = 8192;
   config.recv_wait_timeout = 3; config.send_wait_timeout = 3;
   config.lru_purge_enable = true;
   if (httpd_start(&commands, &config) == ESP_OK) {
     route(commands, "/", HTTP_GET, indexHandler);
-    route(commands, "/api", HTTP_GET, apiHandler);
     route(commands, "/status", HTTP_GET, statusHandler);
     route(commands, "/config", HTTP_GET, configHandler);
     route(commands, "/capture", HTTP_GET, captureHandler);

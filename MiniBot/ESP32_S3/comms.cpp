@@ -3,6 +3,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdio.h>
+#include <math.h>
 #include <WiFi.h>
 #include <esp_sleep.h>
 #include <driver/uart.h>
@@ -24,6 +25,10 @@
 #define MAX_LINE_LEN 128
 #define MOTOR_ROTATE_TIMEOUT_MS 15000UL
 #define MOTOR_ROTATE_OVERSHOOT_DEGREES 2.0f
+#define MOTOR_AUTO_CALIBRATION_PWM_PERCENT 30
+#define MOTOR_AUTO_CALIBRATION_MAX_SECONDS 60UL
+#define MOTOR_AUTO_CALIBRATION_RATE_SCALE_DPS 30.0f
+#define MOTOR_AUTO_CALIBRATION_MAX_REDUCTION_PERCENT 50
 
 struct PortState {
   Stream *stream;
@@ -159,8 +164,10 @@ static bool cmdSleep(Print *output, const char *args) {
   if (!cameraSleepReady || cameraSleepFailed) {
     wakeCamera(); // Also cancels a CAM transition that finishes after timeout.
     GYRO_RestoreAfterSleep(false);
-    LCD_Clear();
-    BATT_ShowStatus();
+    if (!FACE_Show(0)) {
+      LCD_Clear();
+      BATT_ShowStatus();
+    }
     output->println("ERR CAM sleep rejected or timed out; S3 sleep cancelled");
     return false;
   }
@@ -239,7 +246,7 @@ static bool cmdMotorRotate(Print *output, const char *args) {
   int pwmPercent;
   float targetDegrees;
   if (sscanf(args, "%d %f", &pwmPercent, &targetDegrees) != 2 ||
-      pwmPercent < 0 || pwmPercent > 100 || targetDegrees <= 0.0f) {
+      pwmPercent < 0 || pwmPercent > 100 || !isfinite(targetDegrees) || targetDegrees == 0.0f) {
     output->println("ERR motor rotate <pwm> <angle>");
     return false;
   }
@@ -254,21 +261,25 @@ static bool cmdMotorRotate(Print *output, const char *args) {
     return false;
   }
 
+  const float direction = targetDegrees > 0.0f ? 1.0f : -1.0f;
+  targetDegrees = fabsf(targetDegrees);
+  const bool motor1Forward = direction > 0 ? MOTOR_ROTATE_MOTOR1_FORWARD : !MOTOR_ROTATE_MOTOR1_FORWARD;
+  const bool motor2Forward = direction > 0 ? MOTOR_ROTATE_MOTOR2_FORWARD : !MOTOR_ROTATE_MOTOR2_FORWARD;
   float startDegrees = GYRO_GetAngleDegrees(axis);
   unsigned long startMs = millis();
-  MOTOR_Set(1, MOTOR_ROTATE_MOTOR1_FORWARD, pwmPercent);
-  MOTOR_Set(2, MOTOR_ROTATE_MOTOR2_FORWARD, pwmPercent);
+  MOTOR_Set(1, motor1Forward, pwmPercent);
+  MOTOR_Set(2, motor2Forward, pwmPercent);
 
   bool correctingOvershoot = false;
   while (millis() - startMs < MOTOR_ROTATE_TIMEOUT_MS) {
     GYRO_Update();
-    float deltaDegrees = GYRO_GetAngleDegrees(axis) - startDegrees;
+    float deltaDegrees = direction * (GYRO_GetAngleDegrees(axis) - startDegrees);
 
     if (!correctingOvershoot && deltaDegrees >= targetDegrees) {
       if (deltaDegrees <= targetDegrees + MOTOR_ROTATE_OVERSHOOT_DEGREES) break;
       correctingOvershoot = true;
-      MOTOR_Set(1, !MOTOR_ROTATE_MOTOR1_FORWARD, pwmPercent / 2);
-      MOTOR_Set(2, !MOTOR_ROTATE_MOTOR2_FORWARD, pwmPercent / 2);
+      MOTOR_Set(1, !motor1Forward, pwmPercent / 2);
+      MOTOR_Set(2, !motor2Forward, pwmPercent / 2);
     } else if (correctingOvershoot && deltaDegrees <= targetDegrees) {
       break;
     }
@@ -283,11 +294,89 @@ static bool cmdMotorRotate(Print *output, const char *args) {
   return true;
 }
 
+static bool cmdMotorCalibrate(Print *output, const char *args) {
+  char motorText[16], percentText[16], extra[2];
+  if (sscanf(args, "%15s %15s %1s", motorText, percentText, extra) != 2 ||
+      strlen(motorText) != 1 || motorText[0] < '0' || motorText[0] > '2') {
+    output->println("ERR motor calibrate <1|2> <0-100> | <0> <seconds>");
+    return false;
+  }
+
+  if (motorText[0] == '0') {
+    unsigned long durationSeconds = 0;
+    for (const char *p = percentText; *p; ++p) {
+      if (*p < '0' || *p > '9' ||
+          (durationSeconds = durationSeconds * 10 + (*p - '0')) >
+              MOTOR_AUTO_CALIBRATION_MAX_SECONDS) {
+        output->println("ERR motor calibrate 0 <1-60 seconds>");
+        return false;
+      }
+    }
+    if (durationSeconds == 0) {
+      output->println("ERR motor calibrate 0 <1-60 seconds>");
+      return false;
+    }
+    if (!GYRO_IsDetected()) {
+      output->println("ERR gyro not detected");
+      return false;
+    }
+
+    const float startAngle = GYRO_GetAngleDegrees(0);
+    const unsigned long startMs = millis();
+    MOTOR_Set(1, true, MOTOR_AUTO_CALIBRATION_PWM_PERCENT);
+    MOTOR_Set(2, true, MOTOR_AUTO_CALIBRATION_PWM_PERCENT);
+    while (millis() - startMs < durationSeconds * 1000UL) {
+      GYRO_Update();
+      delay(5);
+    }
+    MOTOR_StopAll();
+    GYRO_Update();
+
+    const float angleDelta = GYRO_GetAngleDegrees(0) - startAngle;
+    const float rateDps = fabsf(angleDelta) / durationSeconds;
+    const int strongerMotor = angleDelta > 0.0f ? 1 : angleDelta < 0.0f ? 2 : 0;
+    if (!strongerMotor) {
+      output->printf("MOTOR calibration unchanged; X error %.2f deg\n", angleDelta);
+      return true;
+    }
+
+    const int currentPercent = MOTOR_GetCalibration(strongerMotor);
+    const float requestedReduction =
+        rateDps / MOTOR_AUTO_CALIBRATION_RATE_SCALE_DPS * 100.0f;
+    const int reduction = constrain((int)lroundf(requestedReduction), 0,
+                                    MOTOR_AUTO_CALIBRATION_MAX_REDUCTION_PERCENT);
+    const int newPercent = constrain(
+        (int)lroundf(currentPercent * (100.0f - reduction) / 100.0f), 0, 100);
+    if (!MOTOR_Calibrate(strongerMotor, newPercent)) {
+      output->println("ERR cannot save motor calibration; unchanged");
+      return false;
+    }
+    output->printf("MOTOR auto calibration: X error %.2f deg, motor %d %d%%\n",
+                   angleDelta, strongerMotor, newPercent);
+    return true;
+  }
+
+  unsigned percent = 0;
+  for (const char *p = percentText; *p; ++p) {
+    if (*p < '0' || *p > '9' || (percent = percent * 10 + (*p - '0')) > 100) {
+      output->println("ERR motor calibrate <1|2> <0-100> | <0> <seconds>");
+      return false;
+    }
+  }
+  int motor = motorText[0] - '0';
+  if (!MOTOR_Calibrate(motor, percent)) {
+    output->println("ERR cannot save motor calibration; unchanged");
+    return false;
+  }
+  output->printf("MOTOR %d calibration %u%%\n", motor, percent);
+  return true;
+}
+
 static bool cmdMotor(Print *output, const char *args) {
   char subcmd[16];
   const char *subargs = args;
   if (sscanf(args, "%15s", subcmd) != 1) {
-    output->println("ERR motor <move>");
+    output->println("ERR motor <move|rotate|calibrate>");
     return false;
   }
   while (*subargs && !isspace(*subargs)) subargs++;
@@ -295,8 +384,9 @@ static bool cmdMotor(Print *output, const char *args) {
 
   if (strcasecmp(subcmd, "move") == 0) return cmdMotorMove(output, subargs);
   if (strcasecmp(subcmd, "rotate") == 0) return cmdMotorRotate(output, subargs);
+  if (strcasecmp(subcmd, "calibrate") == 0) return cmdMotorCalibrate(output, subargs);
 
-  output->println("ERR motor <move|rotate>");
+  output->println("ERR motor <move|rotate|calibrate>");
   return false;
 }
 
@@ -507,6 +597,8 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  lcd status");
   output->println("  lcd text <text>");
   output->println("  lcd time");
+  output->println("  motor calibrate <1|2> <0-100>");
+  output->println("  motor calibrate 0 <1-60 seconds>");
   output->println("  motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
   output->println("  motor rotate <pwm> <angle>");
   output->println("  sleep");
