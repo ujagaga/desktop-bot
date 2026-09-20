@@ -28,7 +28,7 @@ void loop() {
   MOTOR_Process();
   uint8_t taps = GYRO_PollTaps();
   if (taps) Serial.printf("GYRO: %u tap(s)\n", taps);
-  if (taps == 3) COMMS_Execute("sleep", Serial);
+  if (taps >= GYRO_GetSleepTapThreshold()) COMMS_Execute("sleep", Serial);
   HTTP_SERVER_Process();
   HTTP_CLIENT_Process();
 }
