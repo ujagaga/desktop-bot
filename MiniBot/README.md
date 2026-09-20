@@ -16,13 +16,14 @@ MiniBot is an ESP32-S3 robot controller with a 240x240 ST7789 LCD, QMI8658 IMU, 
 | --- | ---: |
 | IMU SDA | 47 |
 | IMU SCL | 48 |
-| IMU INT1 | 46, currently unused |
+| IMU INT1 (motion wake) | 46 |
 | IMU INT2 | 45, currently unused |
 | Command UART RX | 13 |
 | Command UART TX | 14 |
 | Motor 1 | 9 / 10 |
 | Motor 2 | 11 / 12 |
 | Battery ADC | 6 |
+| Touch sleep/wake pad | 7 |
 | LCD SCLK | 40 |
 | LCD MOSI | 41 |
 | LCD CS | 39 |
@@ -31,6 +32,39 @@ MiniBot is an ESP32-S3 robot controller with a 240x240 ST7789 LCD, QMI8658 IMU, 
 | LCD backlight | 20 |
 
 The command interface is available through USB `Serial` and the GPIO UART `Serial2` at `115200` baud. Commands are ASCII lines terminated by a newline and are case-insensitive.
+
+## Touch sleep and wake
+
+Connect a capacitive pad to GPIO7. With the pad untouched, run `touch calibrate`
+from serial or the HTTP console. After a two-second settling period, calibration
+is measured and saved in Preferences (NVS), surviving restarts. Startup loads
+the saved baseline without recalibrating. Until calibration is saved, touch
+sleep/wake and the sleep command are disabled. Recalibrate after changing the
+pad or wiring. The command stops motors before sampling; failed or unstable
+measurements leave the previous calibration unchanged. Keep the pad untouched
+for the entire command, including when using HTTP, which buffers the reply.
+Hold it for at least three seconds, then release to enter light sleep. A short
+touch wakes the robot; release the pad before starting another long press.
+The display and Wi-Fi restore through the same handler used by the `sleep`
+command. Motors stop before sleeping. Serial and HTTP sleep also enable touch
+wake; sleep is refused if touch calibration failed or the pad is still held.
+
+Run `touch measure`, then touch and release the pad to obtain its peak raw
+reading. The command sends `TOUCH MAX <value>` followed by `OK` only after the
+pad has been released for 60 ms. It also accepts a touch already in progress.
+Saved calibration is required to detect touch and release; measurement does
+not change it. If no touch starts within 30 seconds, an error is returned.
+Once touched, measurement waits for release without a hold timeout. Motors
+are stopped, long-press sleep is suspended, and other commands wait until
+measurement finishes. Serial and HTTP use the same behavior.
+
+`TOUCH_HOLD_MS` and `TOUCH_THRESHOLD_PERCENT` in `ESP32_S3/config.h` control
+hold duration and sensitivity. The default activation level is 20% above the
+saved baseline, with a lower release threshold and 60 ms debounce. Baseline
+and activation readings are returned by `touch calibrate`. Adjust sensitivity for
+the actual pad and wiring; lower percentages detect smaller changes. Long
+blocking commands/OTA interrupt hold tracking, so release and try again after
+they finish. Wake detection runs in hardware while the CPU sleeps.
 
 ## Commands
 
@@ -113,7 +147,17 @@ gyro calibrate
 - `gyro angle` reports integrated relative rotation in degrees from the last calibration or startup.
 - `gyro calibrate` averages the stationary gyro bias for about one second and resets the integrated angles.
 
-The gyro is also initialized and calibrated automatically at startup and after waking from light sleep. Keep the robot still during calibration.
+Gyro bias is loaded from Preferences namespace `miniBotGyro`, key `bias_v1`,
+at startup. If no valid saved bias exists, startup calibrates once. The
+`gyro calibrate` command and non-motion wakes recalibrate using stationary
+samples. Fresh offsets always take effect in RAM; NVS is written only when
+any axis differs by at least `GYRO_BIAS_SAVE_DELTA_DPS` (default 0.25 degrees/s)
+from its last saved value. Storage failures retain the RAM calibration and
+are logged on USB serial. Wi-Fi and touch use separate namespaces.
+
+A bias is an angular-rate correction, not an angle: 0.25 degrees/s corresponds
+to 5 degrees of drift over 20 seconds. It does not guarantee 5-degree accuracy
+over arbitrary durations. Keep the robot still during calibration.
 
 ### Motors
 
@@ -132,6 +176,32 @@ motor move 0 FWD 50 500
 motor move 2 BACK 35 1000
 motor rotate 40 90
 ```
+
+### HTTP console
+
+Once Wi-Fi is connected, open `http://<device-ip>/` for the web console on port 80.
+Use `wifi ip` over serial to find the address. Enter `help` in the page to list
+commands. `http_server.cpp` uses `COMMS_Execute()` from `comms.h`, so the web
+console and both serial ports share all command handlers and `OK`/`ERR` replies.
+The page displays command replies; background serial logs are not streamed.
+
+Commands can also be sent directly with GET:
+
+```sh
+curl --get --data-urlencode 'cmd=batt v' http://<device-ip>/command
+curl --get --data-urlencode 'cmd=lcd text Hello MiniBot' http://<device-ip>/command
+```
+
+The endpoint accepts one command of up to 127 bytes without line endings and
+returns plain text. Missing or malformed input returns HTTP 400; executed
+commands return HTTP 200 with the normal command response, including `ERR` for
+command failures. Long-running commands finish before their response is sent.
+`sleep` responds with `OK sleep scheduled` before invoking the shared sleep
+handler, with a 500 ms grace period for delivery before Wi-Fi turns off. This
+acknowledges scheduling; it does not confirm that sleep has completed.
+`wifi off`, `wifi clear`, or changing Wi-Fi may disconnect the request after
+executing. The server resumes when Wi-Fi reconnects. The console has no
+authentication and is intended for a trusted local network.
 
 ### Wi-Fi
 
@@ -155,7 +225,19 @@ NTP has not completed, `lcd time` returns `ERR time unavailable`.
 sleep
 ```
 
-Enters light sleep and wakes on activity on UART0. The LCD backlight is disabled during sleep and restored after wake. The gyro is reinitialized and calibrated after waking.
+Enters light sleep and wakes on GPIO7 touch, UART0 activity, or QMI8658 motion
+via INT1/GPIO46. The LCD backlight is disabled during sleep and restored after
+wake. The IMU uses its low-power accelerometer for motion detection, with
+`GYRO_WAKE_THRESHOLD_MG` (default 20 mg) sensitivity and an initial eight-sample
+blanking period. This detects acceleration changes, not a five-degree angle;
+very slow rotation, especially around gravity, may not trigger it.
+
+Normal gyro sensing resumes after wake. Motion wakes retain the RAM bias;
+touch/UART wakes recalibrate and save only significant bias changes. A motion
+flag coincident with another wake also suppresses calibration. Sleep time is
+excluded from angle integration; movement during sleep is not reconstructed.
+If motion wake cannot be configured, sleep is cancelled. Hardware sensitivity
+and interrupt behavior must be verified on the actual board.
 
 Wi-Fi disconnects and the radio turns off before sleep. If Wi-Fi was enabled,
 the device reconnects to the same network asynchronously after waking, which
@@ -171,7 +253,10 @@ off. Sleep does not erase saved credentials.
 
 ## Build and upload
 
-Install `arduino-cli` and the ESP32 Arduino core first. The project uses the `esp32:esp32:esp32s3` board target.
+Install `arduino-cli` and the ESP32 Arduino core first. The project uses the `esp32:esp32:esp32s3` board target with
+`FlashSize=16M,PartitionScheme=app3M_fat9M_16MB`: two 3 MiB OTA firmware
+slots and approximately 10 MiB of FAT filesystem space on the 16 MB flash.
+The build script and VS Code Arduino settings select this layout by default.
 
 Compile only:
 
@@ -188,10 +273,17 @@ tools/build_s3.sh upload
 Override the board or serial port with environment variables:
 
 ```bash
-FQBN=esp32:esp32:esp32s3 PORT=/dev/ttyUSB0 tools/build_s3.sh upload
+FQBN='esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB' PORT=/dev/ttyUSB0 tools/build_s3.sh upload
 ```
 
 Close the serial monitor before uploading so it does not hold the serial port open.
+
+Devices using the old 4 MB layout need one USB upload with this configuration
+to install the new partition table and bootloader settings. Application-only
+OTA cannot migrate the partition layout. Do not select a full-chip erase:
+NVS remains at offset `0x9000`, size `0x5000`, preserving Wi-Fi and touch
+Preferences during a normal upload. A bare FQBN override without these flash
+options reverts to the Arduino core defaults.
 
 ### Firmware version and OTA artifact
 
@@ -203,7 +295,7 @@ After running `tools/build_s3.sh`, commit the source changes together with
 `ESP32_S3/build/ESP32_S3.ino.bin`. This application binary is the only build
 artifact tracked by Git and is the image to use for application OTA updates.
 Bootloader, partition table, merged flash images, and other build outputs remain
-ignored. The application binary must fit within the current 1,310,720-byte OTA
+ignored. The application binary must fit within the 3,145,728-byte OTA
 slot, and the device must already have a compatible partition layout.
 
 After each Wi-Fi connection, `http_client.cpp` checks the latest commit on

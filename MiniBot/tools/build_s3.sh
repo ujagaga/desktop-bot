@@ -6,7 +6,7 @@
 #   tools/build_s3.sh upload     compile, then flash
 #
 # Overrides via env:
-#   FQBN=esp32:esp32:esp32s3   target board
+#   FQBN=...                 override full board target and flash options
 #   PORT=/dev/ttyACM0          serial port for upload
 set -euo pipefail
 
@@ -15,7 +15,8 @@ SKETCH_DIR="$REPO_DIR/ESP32_S3"
 BUILD_DIR="$SKETCH_DIR/build"
 CACHE_DIR="$SKETCH_DIR/.cache"
 [ -f "$REPO_DIR/.env" ] && source "$REPO_DIR/.env"
-FQBN="${FQBN:-esp32:esp32:esp32s3}"
+# 16 MB flash, two 3 MiB OTA slots; NVS remains at 0x9000 (20 KiB).
+FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB}"
 PORT="${PORT:-/dev/ttyACM0}"
 
 command -v arduino-cli >/dev/null 2>&1 || {

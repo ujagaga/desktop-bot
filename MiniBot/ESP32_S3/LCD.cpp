@@ -73,7 +73,7 @@ void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
 
   tft.setTextSize(2);
   tft.setCursor(10, 20);
-  tft.print("FW ");
+  tft.print("Firmware V ");
   tft.print(FIRMWARE_VERSION);
 
   tft.setCursor(10, 55);

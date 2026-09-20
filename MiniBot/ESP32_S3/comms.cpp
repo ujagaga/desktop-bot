@@ -14,6 +14,7 @@
 #include "motor.h"
 #include "gyro.h"
 #include "faces.h"
+#include "touch_button.h"
 
 #define COMMS_BAUD 115200
 #define GPIO_UART_RX 13
@@ -48,62 +49,81 @@ static bool rxPop(PortState *port, uint8_t *b) {
   return true;
 }
 
-static bool cmdBacklight(PortState *port, const char *args) {
-  (void)port;
+static bool cmdBacklight(Print *output, const char *args) {
+  (void)output;
   LCD_BacklightSet(atoi(args));
   return true;
 }
 
-static bool cmdBattery(PortState *port, const char *args) {
+static bool cmdBattery(Print *output, const char *args) {
   char subcmd[4];
   if (sscanf(args, "%3s", subcmd) != 1) {
-    port->stream->println("ERR batt <c|v>");
+    output->println("ERR batt <c|v>");
     return false;
   }
 
   if (strcasecmp(subcmd, "c") == 0) {
-    port->stream->printf("%d\n", BATT_GetPercent());
+    output->printf("%d\n", BATT_GetPercent());
     return true;
   }
   if (strcasecmp(subcmd, "v") == 0) {
-    port->stream->printf("%.2f\n", BATT_GetVoltage());
+    output->printf("%.2f\n", BATT_GetVoltage());
     return true;
   }
 
-  port->stream->println("ERR batt <c|v>");
+  output->println("ERR batt <c|v>");
   return false;
 }
 
-static bool cmdSleep(PortState *port, const char *args) {
-  (void)port;
+static bool cmdSleep(Print *output, const char *args) {
+  (void)output;
   (void)args;
-  Serial.println("Sleeping until UART activity...");
+  if (!TOUCH_PrepareForSleep()) {
+    output->println("ERR touch wake unavailable or pad held; release pad before sleep");
+    return false;
+  }
+  MOTOR_StopAll();
+  if (!GYRO_PrepareForSleep()) {
+    GYRO_RestoreAfterSleep(false);
+    output->println("ERR cannot configure motion wake; sleep cancelled");
+    return false;
+  }
+  Serial.println("Sleeping until motion, touch or UART activity...");
   Serial.flush();
 
   LCD_BacklightOff();
   WIFI_PrepareForSleep();
   uart_set_wakeup_threshold(UART_NUM_0, 3);
   esp_sleep_enable_uart_wakeup(UART_NUM_0);
-  esp_light_sleep_start();
+  esp_err_t sleepResult = esp_light_sleep_start();
+  TOUCH_AfterWake();
   LCD_BacklightRestore();
   CLOCK_ResetSync();
-  GYRO_Init();
+  bool gyroRestored = GYRO_RestoreAfterSleep(sleepResult == ESP_OK);
   WIFI_RestoreAfterSleep();
+  if (!gyroRestored) {
+    output->println("ERR gyro restore/calibration failed after sleep");
+    return false;
+  }
+  if (sleepResult != ESP_OK) {
+    output->println("ERR failed to enter light sleep");
+    return false;
+  }
   return true;
 }
 
-static bool cmdMotorMove(PortState *port, const char *args) {
+static bool cmdMotorMove(Print *output, const char *args) {
   int motorId, pwmPercent;
   unsigned long durationMs;
   char dir[8];
   if (sscanf(args, "%d %7s %d %lu", &motorId, dir, &pwmPercent, &durationMs) != 4 ||
       motorId < 0 || motorId > 2) {
-    port->stream->println("ERR motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
+    output->println("ERR motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
     return false;
   }
   bool forward = strcasecmp(dir, "FWD") == 0;
   if (strcasecmp(dir, "FWD") != 0 && strcasecmp(dir, "BACK") != 0) {
-    port->stream->println("ERR motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
+    output->println("ERR motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
     return false;
   }
   if (motorId == 0) {
@@ -115,22 +135,22 @@ static bool cmdMotorMove(PortState *port, const char *args) {
   return true;
 }
 
-static bool cmdMotorRotate(PortState *port, const char *args) {
+static bool cmdMotorRotate(Print *output, const char *args) {
   int pwmPercent;
   float targetDegrees;
   if (sscanf(args, "%d %f", &pwmPercent, &targetDegrees) != 2 ||
       pwmPercent < 0 || pwmPercent > 100 || targetDegrees <= 0.0f) {
-    port->stream->println("ERR motor rotate <pwm> <angle>");
+    output->println("ERR motor rotate <pwm> <angle>");
     return false;
   }
 
   int axis = MOTOR_ROTATE_AXIS_INDEX;
   if (axis < 0 || axis > 2) {
-    port->stream->println("ERR motor rotate axis configuration");
+    output->println("ERR motor rotate axis configuration");
     return false;
   }
   if (!GYRO_IsDetected()) {
-    port->stream->println("ERR gyro not detected");
+    output->println("ERR gyro not detected");
     return false;
   }
 
@@ -157,115 +177,115 @@ static bool cmdMotorRotate(PortState *port, const char *args) {
 
   MOTOR_StopAll();
   if (millis() - startMs >= MOTOR_ROTATE_TIMEOUT_MS) {
-    port->stream->println("ERR motor rotate timeout");
+    output->println("ERR motor rotate timeout");
     return false;
   }
   return true;
 }
 
-static bool cmdMotor(PortState *port, const char *args) {
+static bool cmdMotor(Print *output, const char *args) {
   char subcmd[16];
   const char *subargs = args;
   if (sscanf(args, "%15s", subcmd) != 1) {
-    port->stream->println("ERR motor <move>");
+    output->println("ERR motor <move>");
     return false;
   }
   while (*subargs && !isspace(*subargs)) subargs++;
   while (isspace(*subargs)) subargs++;
 
-  if (strcasecmp(subcmd, "move") == 0) return cmdMotorMove(port, subargs);
-  if (strcasecmp(subcmd, "rotate") == 0) return cmdMotorRotate(port, subargs);
+  if (strcasecmp(subcmd, "move") == 0) return cmdMotorMove(output, subargs);
+  if (strcasecmp(subcmd, "rotate") == 0) return cmdMotorRotate(output, subargs);
 
-  port->stream->println("ERR motor <move|rotate>");
+  output->println("ERR motor <move|rotate>");
   return false;
 }
 
-static bool cmdLCDRotate(PortState *port, const char *args) {
+static bool cmdLCDRotate(Print *output, const char *args) {
   int rotation;
   if (sscanf(args, "%d", &rotation) != 1 || rotation < 0 || rotation > 3) {
-    port->stream->println("ERR lcdrotate <0|1|2|3>");
+    output->println("ERR lcdrotate <0|1|2|3>");
     return false;
   }
   LCD_SetRotation(rotation);
   return true;
 }
 
-static bool cmdAngle(PortState *port, const char *args) {
+static bool cmdAngle(Print *output, const char *args) {
   char axisText[8];
   if (sscanf(args, "%7s", axisText) != 1) {
-    port->stream->println("ERR angle <x|y|z|0|1|2>");
+    output->println("ERR angle <x|y|z|0|1|2>");
     return false;
   }
 
   int axis = GYRO_AxisIndexFromText(axisText);
   if (axis < 0) {
-    port->stream->println("ERR angle <x|y|z|0|1|2>");
+    output->println("ERR angle <x|y|z|0|1|2>");
     return false;
   }
   if (!GYRO_IsDetected()) {
-    port->stream->println("ERR gyro not detected");
+    output->println("ERR gyro not detected");
     return false;
   }
 
-  port->stream->printf("%.2f\n", GYRO_GetAngleDegrees(axis));
+  output->printf("%.2f\n", GYRO_GetAngleDegrees(axis));
   return true;
 }
 
-static bool cmdRate(PortState *port, const char *args) {
+static bool cmdRate(Print *output, const char *args) {
   char axisText[8];
   if (sscanf(args, "%7s", axisText) != 1) {
-    port->stream->println("ERR rate <x|y|z|0|1|2>");
+    output->println("ERR rate <x|y|z|0|1|2>");
     return false;
   }
 
   int axis = GYRO_AxisIndexFromText(axisText);
   if (axis < 0) {
-    port->stream->println("ERR rate <x|y|z|0|1|2>");
+    output->println("ERR rate <x|y|z|0|1|2>");
     return false;
   }
   if (!GYRO_IsDetected()) {
-    port->stream->println("ERR gyro not detected");
+    output->println("ERR gyro not detected");
     return false;
   }
 
-  port->stream->printf("RATE %c = %.2f dps\n", "XYZ"[axis], GYRO_GetRateDps(axis));
+  output->printf("RATE %c = %.2f dps\n", "XYZ"[axis], GYRO_GetRateDps(axis));
   return true;
 }
 
-static bool cmdCalibrate(PortState *port, const char *args) {
+static bool cmdCalibrate(Print *output, const char *args) {
   (void)args;
   if (!GYRO_IsDetected()) {
-    port->stream->println("ERR gyro not detected");
+    output->println("ERR gyro not detected");
     return false;
   }
 
-  port->stream->println("CALIBRATING keep gyro still...");
+  output->println("CALIBRATING keep gyro still...");
   float biasDps[3];
   if (!GYRO_Calibrate(biasDps)) {
-    port->stream->println("ERR gyro read failed during calibration");
+    output->println("ERR gyro read failed during calibration");
     return false;
   }
-  port->stream->printf("BIAS X=%.2f Y=%.2f Z=%.2f dps\n",
+  output->printf("BIAS X=%.2f Y=%.2f Z=%.2f dps\n",
                        biasDps[0], biasDps[1], biasDps[2]);
   return true;
 }
 
-static bool cmdGyro(PortState *port, const char *args) {
+static bool cmdGyro(Print *output, const char *args) {
   char subcmd[16];
   const char *subargs = args;
   if (sscanf(args, "%15s", subcmd) != 1) {
-    port->stream->println("ERR gyro <angle|rate|calibrate>");
+    output->println("ERR gyro <angle|rate|calibrate>");
     return false;
   }
 
   while (*subargs && !isspace(*subargs)) subargs++;
   while (isspace(*subargs)) subargs++;
 
-  if (strcasecmp(subcmd, "angle") == 0) return cmdAngle(port, subargs);
-  if (strcasecmp(subcmd, "rate") == 0) return cmdRate(port, subargs);
-  if (strcasecmp(subcmd, "calibrate") == 0) return cmdCalibrate(port, subargs);
+  if (strcasecmp(subcmd, "angle") == 0) return cmdAngle(output, subargs);
+  if (strcasecmp(subcmd, "rate") == 0) return cmdRate(output, subargs);
+  if (strcasecmp(subcmd, "calibrate") == 0) return cmdCalibrate(output, subargs);
 
-  port->stream->println("ERR gyro <angle|rate|calibrate>");
+  output->println("ERR gyro <angle|rate|calibrate>");
   return false;
 }
 
@@ -284,77 +304,89 @@ static bool getTimeText(char *timeText, size_t timeTextSize,
   return true;
 }
 
-static bool cmdTime(PortState *port, const char *args) {
+static bool cmdTime(Print *output, const char *args) {
   (void)args;
   char timeText[6];
   char dateText[32];
   if (!getTimeText(timeText, sizeof(timeText), dateText, sizeof(dateText))) {
-    port->stream->println("ERR time unavailable");
+    output->println("ERR time unavailable");
     return false;
   }
-  port->stream->println(timeText);
-  port->stream->println(dateText);
+  output->println(timeText);
+  output->println(dateText);
   return true;
 }
 
-static bool cmdLCDTime(PortState *port) {
+static bool cmdLCDTime(Print *output) {
   char timeText[6];
   char dateText[32];
   if (!getTimeText(timeText, sizeof(timeText), dateText, sizeof(dateText))) {
-    port->stream->println("ERR time unavailable");
+    output->println("ERR time unavailable");
     return false;
   }
   LCD_ShowTime(timeText, dateText);
   return true;
 }
 
-static bool cmdHelp(PortState *port, const char *args) {
+static bool cmdTouch(Print *output, const char *args) {
+  char subcmd[16], extra[2];
+  if (sscanf(args, "%15s %1s", subcmd, extra) == 1) {
+    if (strcasecmp(subcmd, "calibrate") == 0) return TOUCH_Calibrate(*output);
+    if (strcasecmp(subcmd, "measure") == 0) return TOUCH_Measure(*output);
+  }
+  output->println("ERR touch <calibrate|measure>");
+  return false;
+}
+
+static bool cmdHelp(Print *output, const char *args) {
   (void)args;
-  port->stream->println("Commands:");
-  port->stream->println("  help");
-  port->stream->println("  batt c");
-  port->stream->println("  batt v");
-  port->stream->println("  gyro angle <x|y|z|0|1|2>");
-  port->stream->println("  gyro calibrate");
-  port->stream->println("  gyro rate <x|y|z|0|1|2>");
-  port->stream->println("  lcd bl <0-100>");
-  port->stream->println("  lcd clear");
-  port->stream->println("  lcd face <0-15>");
-  port->stream->println("  lcd rotate <0|1|2|3>");
-  port->stream->println("  lcd status");
-  port->stream->println("  lcd text <text>");
-  port->stream->println("  lcd time");
-  port->stream->println("  motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
-  port->stream->println("  motor rotate <pwm> <angle>");
-  port->stream->println("  sleep");
-  port->stream->println("  time");
-  port->stream->println("  wifi clear");
-  port->stream->println("  wifi ip");
-  port->stream->println("  wifi off");
-  port->stream->println("  wifi on <ssid> <pass>");
+  output->println("Commands:");
+  output->println("  help");
+  output->println("  batt c");
+  output->println("  batt v");
+  output->println("  gyro angle <x|y|z|0|1|2>");
+  output->println("  gyro calibrate");
+  output->println("  gyro rate <x|y|z|0|1|2>");
+  output->println("  lcd bl <0-100>");
+  output->println("  lcd clear");
+  output->println("  lcd face <0-15>");
+  output->println("  lcd rotate <0|1|2|3>");
+  output->println("  lcd status");
+  output->println("  lcd text <text>");
+  output->println("  lcd time");
+  output->println("  motor move <0|1|2> <FWD|BACK> <pwm> <ms>");
+  output->println("  motor rotate <pwm> <angle>");
+  output->println("  sleep");
+  output->println("  time");
+  output->println("  touch calibrate");
+  output->println("  touch measure");
+  output->println("  wifi clear");
+  output->println("  wifi ip");
+  output->println("  wifi off");
+  output->println("  wifi on <ssid> <pass>");
   return true;
 }
 
-static bool cmdLCDClear(PortState *port, const char *args) {
+static bool cmdLCDClear(Print *output, const char *args) {
   (void)args;
   LCD_Clear();
   return true;
 }
 
-static bool cmdLCD(PortState *port, const char *args) {
+static bool cmdLCD(Print *output, const char *args) {
   char subcmd[16];
   const char *subargs = args;
   if (sscanf(args, "%15s", subcmd) != 1) {
-    port->stream->println("ERR lcd <bl|clear|face|rotate|status|text|time>");
+    output->println("ERR lcd <bl|clear|face|rotate|status|text|time>");
     return false;
   }
 
   while (*subargs && !isspace(*subargs)) subargs++;
   while (isspace(*subargs)) subargs++;
 
-  if (strcasecmp(subcmd, "bl") == 0) return cmdBacklight(port, subargs);
-  if (strcasecmp(subcmd, "rotate") == 0) return cmdLCDRotate(port, subargs);
-  if (strcasecmp(subcmd, "clear") == 0) return cmdLCDClear(port, subargs);
+  if (strcasecmp(subcmd, "bl") == 0) return cmdBacklight(output, subargs);
+  if (strcasecmp(subcmd, "rotate") == 0) return cmdLCDRotate(output, subargs);
+  if (strcasecmp(subcmd, "clear") == 0) return cmdLCDClear(output, subargs);
   if (strcasecmp(subcmd, "status") == 0) {
     LCD_Clear();
     BATT_ShowStatus();
@@ -365,25 +397,25 @@ static bool cmdLCD(PortState *port, const char *args) {
     return true;
   }
   if (strcasecmp(subcmd, "time") == 0) {
-    return cmdLCDTime(port);
+    return cmdLCDTime(output);
   }
   if (strcasecmp(subcmd, "face") == 0) {
     int faceId;
     if (sscanf(subargs, "%d", &faceId) != 1 || !FACE_Show(faceId)) {
-      port->stream->println("ERR lcd face <0-15>");
+      output->println("ERR lcd face <0-15>");
       return false;
     }
     return true;
   }
 
-  port->stream->println("ERR lcd <bl|clear|face|rotate|status|text|time>");
+  output->println("ERR lcd <bl|clear|face|rotate|status|text|time>");
   return false;
 }
 
-static bool cmdWifi(PortState *port, const char *args) {
+static bool cmdWifi(Print *output, const char *args) {
   char subcmd[16];
   if (sscanf(args, "%15s", subcmd) != 1) {
-    port->stream->println("ERR wifi <clear|ip|off|on>");
+    output->println("ERR wifi <clear|ip|off|on>");
     return false;
   }
 
@@ -391,11 +423,11 @@ static bool cmdWifi(PortState *port, const char *args) {
     char ssid[33];
     char pass[64];
     if (sscanf(args, "%*s %32s %63s", ssid, pass) != 2) {
-      port->stream->println("ERR wifi on <ssid> <pass>");
+      output->println("ERR wifi on <ssid> <pass>");
       return false;
     }
     if (!WIFI_Connect(ssid, pass, true)) {
-      port->stream->println("ERR wifi connect failed");
+      output->println("ERR wifi connect failed");
       return false;
     }
     return true;
@@ -413,15 +445,15 @@ static bool cmdWifi(PortState *port, const char *args) {
   }
 
   if (strcasecmp(subcmd, "ip") == 0) {
-    port->stream->println(WiFi.status() == WL_CONNECTED ? WiFi.localIP() : IPAddress(0, 0, 0, 0));
+    output->println(WiFi.status() == WL_CONNECTED ? WiFi.localIP() : IPAddress(0, 0, 0, 0));
     return true;
   }
 
-  port->stream->println("ERR wifi <clear|ip|off|on>");
+  output->println("ERR wifi <clear|ip|off|on>");
   return false;
 }
 
-typedef bool (*CommandHandler)(PortState *port, const char *args);
+typedef bool (*CommandHandler)(Print *output, const char *args);
 
 struct CommandEntry {
   const char *name;
@@ -437,10 +469,11 @@ static const CommandEntry commandMap[] = {
   { "motor", cmdMotor },
   { "sleep", cmdSleep },
   { "time", cmdTime },
+  { "touch", cmdTouch },
   { "wifi", cmdWifi },
 };
 
-static void dispatch(PortState *port, char *line) {
+static void dispatch(Print *output, char *line) {
   char *args = line;
   while (*args && !isspace(*args)) args++;
   if (*args) *args++ = '\0';
@@ -448,12 +481,26 @@ static void dispatch(PortState *port, char *line) {
 
   for (size_t i = 0; i < sizeof(commandMap) / sizeof(commandMap[0]); i++) {
     if (strcasecmp(commandMap[i].name, line) == 0) {
-      if (commandMap[i].handler(port, args)) port->stream->println("OK");
+      if (commandMap[i].handler(output, args)) output->println("OK");
       return;
     }
   }
-  port->stream->print("ERR unknown command: ");
-  port->stream->println(line);
+  output->print("ERR unknown command: ");
+  output->println(line);
+}
+
+void COMMS_Execute(const char *command, Print &output) {
+  if (!command || strlen(command) >= MAX_LINE_LEN) {
+    output.println("ERR command too long (maximum 127 bytes)");
+    return;
+  }
+  if (strchr(command, '\r') || strchr(command, '\n')) {
+    output.println("ERR expected one command line");
+    return;
+  }
+  char line[MAX_LINE_LEN];
+  strcpy(line, command);
+  if (*line) dispatch(&output, line);
 }
 
 static void pollPort(PortState *port) {
@@ -467,7 +514,7 @@ static void pollPort(PortState *port) {
   while (rxPop(port, &b)) {
     if (b == '\n') {
       port->lineBuf[port->lineLen] = '\0';
-      if (port->lineLen > 0) dispatch(port, port->lineBuf);
+      if (port->lineLen > 0) COMMS_Execute(port->lineBuf, *port->stream);
       port->lineLen = 0;
     } else if (port->lineLen < MAX_LINE_LEN - 1) {
       port->lineBuf[port->lineLen++] = (char)b;

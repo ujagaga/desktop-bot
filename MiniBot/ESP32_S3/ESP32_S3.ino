@@ -8,6 +8,8 @@
 #include "wifi_connection.h"
 #include "clock.h"
 #include "http_client.h"
+#include "http_server.h"
+#include "touch_button.h"
 
 
 void setup() {
@@ -16,6 +18,8 @@ void setup() {
   HTTP_CLIENT_Init();
   WIFI_Init();
   MOTOR_Init();
+  HTTP_SERVER_Init();
+  TOUCH_Init();
 }
 
 void loop() {
@@ -23,5 +27,7 @@ void loop() {
   CLOCK_Process();
   BATT_process();
   MOTOR_Process();
+  TOUCH_Process();
+  HTTP_SERVER_Process();
   HTTP_CLIENT_Process();
 }
