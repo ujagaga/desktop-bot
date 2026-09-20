@@ -49,7 +49,7 @@ pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{
 <form id="serial-form"><input id="serial-command" aria-label="S3 command" placeholder="help" maxlength="127" autocomplete="off" required>
 <button id="serial-send" type="submit">Send</button></form>
 <p id="serial-status" role="status"></p>
-<small>Automatic IP polling pauses while this console is open. Incoming UART text appears above; a transmitted command does not confirm a reply. Recent output is shared across browsers.</small>
+<small>S3 sends IP reports every five seconds until discovery completes. Incoming UART text appears above; a transmitted command does not confirm a reply. Recent output is shared across browsers.</small>
 </details>
 <section><h2>Device log</h2><pre id="logs"></pre></section>
 <script>

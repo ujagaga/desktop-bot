@@ -30,36 +30,70 @@ HTTP API or written to logs. There is no UART setup requirement after flashing.
 The CAM uses UART0 (`Serial`) at 115200 baud (8N1), with U0R/RX GPIO3
 connected to S3 TX GPIO13 and U0T/TX GPIO1 connected to S3 RX GPIO14, plus
 common ground. This matches the schematic.
-The CAM pins and two-second polling interval are configurable in `config.h`.
+The CAM UART pins are configurable in `config.h`. The five-second discovery
+interval is `CAM_IP_REPORT_INTERVAL_MS` in `ESP32_S3/config.h`.
 These are also the programming UART pins; disconnect the S3 UART wires when
 flashing through a USB-to-UART adapter. Application logs stay in the web UI,
 and runtime SDK serial logging is disabled to keep the command link clean.
 ROM boot output can still appear before the application starts.
 
 An independent FreeRTOS task starts before camera initialization and drains
-UART input even while capture/streaming or the main loop is busy. A software
-timer schedules `wifi ip` requests until a nonzero IPv4 reply arrives;
-`0.0.0.0`, `OK`, errors and malformed lines do not stop discovery. RX remains
-active after the timer stops. The address is cached in the atomic global
-`COMMS_peerWifiIP`; `COMMS_GetPeerWifiIP()` returns a thread-safe text snapshot.
-`GET /api/wifi` includes it as `s3_ip` (empty before discovery), and the Wi-Fi
-section refreshes it automatically. The cached address lasts until reboot;
-discovery does not monitor subsequent S3 address changes.
+UART input even while capture/streaming or the main loop is busy. CAM does not
+initiate IP discovery. Once S3 has a station IP, its cooperative five-second
+timer sends `report ip <s3 ip addr>` until CAM returns a nonzero station IP.
+CAM stores the reported address in the atomic global `COMMS_peerWifiIP`, then
+replies with its own IPv4 address followed by `OK` (`0.0.0.0` if disconnected).
+The S3 shows this address on the LCD's `CAM` row; zero/error replies keep the
+five-second timer running. Discovery restarts after S3 wake, reboot or a change
+in its own station address. CAM-only address changes after discovery are not
+actively monitored.
+
+`report ip` is case-insensitive and requires exactly one valid dotted-decimal
+IPv4 argument. Every valid report replaces the stored S3 address; `0.0.0.0`
+clears it. Invalid requests return `ERR report ip <s3 ip addr>` without changing
+the cache. `COMMS_GetPeerWifiIP()` provides a thread-safe snapshot exposed as
+`s3_ip` by `GET /api/wifi` and refreshed in the UI. The standalone `wifi ip`
+command remains available for manual diagnostics but is not used for discovery.
+Other incoming lines remain console replies and are not answered, preventing
+command/reply feedback loops. Both modules need the matching firmware changes.
 
 Open **S3 serial console** in the CAM UI to send commands such as `help`,
 `wifi ip` or `batt v`. Up/Down recalls the last ten commands stored in the
 browser. The console displays the last 4096 characters of UART traffic;
-`>` marks a transmitted command, `[poll] >` marks automatic discovery, and
+`>` marks a transmitted command, `[reply]` marks a CAM command response, and
 other text is received from the S3 (nonprintable bytes appear as `\xNN`).
 No reply is fabricated when the S3 is silent. Output is shared by all browsers
 and is cleared on CAM reboot.
 
-Opening the console pauses automatic IP requests; they resume 30 seconds
-after the last console read or manual send if no IP has been discovered.
+Opening the console does not change S3 discovery; reports and responses remain
+visible in the transcript.
 The console polls `GET /api/console` every half second while open and visible.
 `POST /api/console` accepts a plain-text ASCII command up to 127 bytes without
 CR/LF. HTTP 202 means queued, not acknowledged by the S3. The UART task owns
 all command writes and continues receiving independently of HTTP/camera work.
+
+### Coordinated sleep and wake
+
+Connect **S3 GPIO7 to CAM GPIO13**, with common ground and a **10 kΩ pull-down**
+from CAM GPIO13 to ground. This is a 3.3 V signal; GPIO13 must not also be used
+for the SD card. S3 holds the line HIGH while awake, drives it LOW before the
+sleep request, and retains LOW through its light sleep. It raises the line on
+confirmed wake, on cancelled sleep, and at startup.
+
+S3 displays face `08_sleepy`, sends `sleep`, and waits up to ten seconds for
+the explicit `CAM SLEEP READY` reply. A plain `OK` is not a sleep acknowledgment.
+CAM rejects sleep during firmware installation or while the wake line is HIGH.
+Its RX task queues the request; the main loop stops HTTP, the camera and Wi-Fi,
+holds the sensor power-down pin HIGH, then acknowledges and enters deep sleep.
+GPIO13 HIGH wakes CAM through EXT0 and restarts the firmware from setup.
+
+S3 leaves the sleepy face visible for at least three seconds before switching
+off its backlight. If CAM rejects the request or fails to acknowledge, S3 cancels
+sleep and raises the wake line, so even a late CAM sleep transition wakes again.
+Isolated motion taps below the S3 wake threshold do not wake CAM. After a real
+wake, S3 returns to its status screen and discovers the CAM address again.
+CAM UI/streaming are unavailable during sleep. Both firmware images must be
+updated for this handshake to work; an older CAM will cause S3 sleep to time out.
 
 The AP chooses a quiet channel among 1, 6 and 11 at startup. When the station
 connects, the ESP32's shared radio follows the station network's channel; AP

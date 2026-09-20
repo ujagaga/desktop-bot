@@ -6,6 +6,7 @@
 #include <WiFi.h>
 #include <esp_sleep.h>
 #include <driver/uart.h>
+#include <driver/gpio.h>
 #include "comms.h"
 #include "battery.h"
 #include "wifi_connection.h"
@@ -50,6 +51,56 @@ static bool rxPop(PortState *port, uint8_t *b) {
   return true;
 }
 
+static char cameraIP[16] = "";
+static unsigned long lastCameraQuery = 0;
+static bool cameraQuerySent = false;
+static uint32_t reportedS3IP = 0;
+static bool cameraSleepWaiting = false, cameraSleepReady = false, cameraSleepFailed = false;
+static void pollPort(PortState *port);
+
+static void wakeCamera() {
+  gpio_hold_dis((gpio_num_t)CAM_WAKE_OUTPUT_GPIO);
+  digitalWrite(CAM_WAKE_OUTPUT_GPIO, HIGH);
+  cameraIP[0] = 0;
+  cameraQuerySent = false;
+  reportedS3IP = 0;
+  lastCameraQuery = millis();
+}
+
+
+const char *COMMS_GetCameraIP() { return cameraIP; }
+
+// GPIO UART is bidirectional: replies must not enter the command dispatcher.
+static bool consumeCameraReply(const char *line) {
+  if (!strcmp(line, "CAM SLEEP READY")) {
+    if (cameraSleepWaiting) cameraSleepReady = true;
+    return true;
+  }
+  if (!strncmp(line, "ERR CAM SLEEP", 13)) {
+    if (cameraSleepWaiting) cameraSleepFailed = true;
+    return true;
+  }
+  if (!strcmp(line, "OK") || !strncmp(line, "ERR", 3)) return true;
+  const char *p = line;
+  unsigned octets[4];
+  for (unsigned i = 0; i < 4; ++i) {
+    unsigned value = 0, digits = 0;
+    while (*p >= '0' && *p <= '9') {
+      value = value * 10 + (*p++ - '0');
+      if (++digits > 3 || value > 255) return false;
+    }
+    if (!digits) return false;
+    octets[i] = value;
+    if (i < 3 && *p++ != '.') return false;
+  }
+  if (*p) return false;
+  if (cameraQuerySent && (octets[0] || octets[1] || octets[2] || octets[3]) &&
+      !(octets[0] == 255 && octets[1] == 255 && octets[2] == 255 && octets[3] == 255)) {
+    snprintf(cameraIP, sizeof(cameraIP), "%u.%u.%u.%u", octets[0], octets[1], octets[2], octets[3]);
+  }
+  return true; // Includes 0.0.0.0: not connected yet; continue polling.
+}
+
 static bool cmdBacklight(Print *output, const char *args) {
   (void)output;
   LCD_BacklightSet(atoi(args));
@@ -85,6 +136,44 @@ static bool cmdSleep(Print *output, const char *args) {
     output->println("ERR cannot configure motion wake; sleep cancelled");
     return false;
   }
+  if (!FACE_Show(8)) {
+    GYRO_RestoreAfterSleep(false);
+    output->println("ERR cannot show sleepy face; sleep cancelled");
+    return false;
+  }
+  LCD_BacklightRestore();
+  const unsigned long faceShownAt = millis();
+  cameraSleepWaiting = true;
+  // Drain old replies first. Only replies are accepted during this handshake.
+  pollPort(&gpioPort);
+  cameraSleepReady = cameraSleepFailed = false;
+  digitalWrite(CAM_WAKE_OUTPUT_GPIO, LOW);
+  Serial2.print("sleep\n");
+  const unsigned long requestAt = millis();
+  while (!cameraSleepReady && !cameraSleepFailed &&
+         millis() - requestAt < CAM_SLEEP_ACK_TIMEOUT_MS) {
+    pollPort(&gpioPort);
+    delay(5);
+  }
+  cameraSleepWaiting = false;
+  if (!cameraSleepReady || cameraSleepFailed) {
+    wakeCamera(); // Also cancels a CAM transition that finishes after timeout.
+    GYRO_RestoreAfterSleep(false);
+    LCD_Clear();
+    BATT_ShowStatus();
+    output->println("ERR CAM sleep rejected or timed out; S3 sleep cancelled");
+    return false;
+  }
+  while (millis() - faceShownAt < SLEEPY_FACE_MIN_MS) delay(10);
+  // Retain the LOW wake output while the S3 itself is in light sleep.
+  if (gpio_hold_en((gpio_num_t)CAM_WAKE_OUTPUT_GPIO) != ESP_OK) {
+    wakeCamera();
+    GYRO_RestoreAfterSleep(false);
+    LCD_Clear();
+    BATT_ShowStatus();
+    output->println("ERR cannot hold CAM wake line; sleep cancelled");
+    return false;
+  }
   Serial.println("Sleeping until multiple taps or UART activity...");
   Serial.flush();
 
@@ -107,7 +196,9 @@ static bool cmdSleep(Print *output, const char *args) {
       break;
     }
   }
+  wakeCamera();
   LCD_BacklightRestore();
+  LCD_Clear();
   CLOCK_ResetSync();
   WIFI_RestoreAfterSleep();
   if (!gyroRestored) {
@@ -598,8 +689,14 @@ static void pollPort(PortState *port) {
   while (rxPop(port, &b)) {
     if (b == '\n') {
       port->lineBuf[port->lineLen] = '\0';
-      if (port->lineLen > 0) COMMS_Execute(port->lineBuf, *port->stream);
+      char line[MAX_LINE_LEN];
+      strcpy(line, port->lineBuf);
+      // Reset before dispatch: sleep may service this port while awaiting ACK.
       port->lineLen = 0;
+      if (*line && !(port == &gpioPort && consumeCameraReply(line))) {
+        if (cameraSleepWaiting) port->stream->println("ERR S3 sleep in progress");
+        else COMMS_Execute(line, *port->stream);
+      }
     } else if (port->lineLen < MAX_LINE_LEN - 1) {
       port->lineBuf[port->lineLen++] = (char)b;
     } else {
@@ -609,6 +706,9 @@ static void pollPort(PortState *port) {
 }
 
 void COMMS_Init() {
+  gpio_hold_dis((gpio_num_t)CAM_WAKE_OUTPUT_GPIO);
+  pinMode(CAM_WAKE_OUTPUT_GPIO, OUTPUT);
+  wakeCamera();
   Serial.begin(COMMS_BAUD);
   Serial2.begin(COMMS_BAUD, SERIAL_8N1, GPIO_UART_RX, GPIO_UART_TX);
   GYRO_Init();
@@ -618,4 +718,20 @@ void COMMS_Poll() {
   GYRO_Update();
   pollPort(&usbPort);
   pollPort(&gpioPort);
+  // Cooperative five-second timer; only this module initiates IP exchange.
+  // Wait for a usable S3 IP so discovery cannot stop before CAM learns it.
+  const uint32_t ownIP = WiFi.status() == WL_CONNECTED ? (uint32_t)WiFi.localIP() : 0;
+  if (reportedS3IP && ownIP != reportedS3IP) {
+    cameraIP[0] = 0;
+    cameraQuerySent = false;
+    reportedS3IP = 0;
+    lastCameraQuery = millis();
+  }
+  if (!*cameraIP && ownIP && millis() - lastCameraQuery >= CAM_IP_REPORT_INTERVAL_MS) {
+    Serial2.print("report ip ");
+    Serial2.println(WiFi.localIP());
+    lastCameraQuery = millis();
+    reportedS3IP = ownIP;
+    cameraQuerySent = true;
+  }
 }

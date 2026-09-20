@@ -27,7 +27,7 @@ bool LCD_SetColor(bool background, uint16_t color);
 
 // Draws a text-only battery/Wi‑Fi status summary on the display.
 void LCD_DrawStatus(float voltage, int percent, const char *timeLabel,
-					 const char *wifiLabel, const char *ipLabel);
+					 const char *wifiLabel, const char *ipLabel, const char *cameraIP = nullptr);
 
 // Shows text at the default size, wrapping to the next line as needed.
 void LCD_ShowText(const char *text);

@@ -30,7 +30,7 @@ static int updatePercent = -1;
 static uint16_t backgroundColor = LCD_BACKGROUND_COLOR;
 static uint16_t foregroundColor = LCD_TEXT_COLOR;
 static String lastText, lastTime, lastDate;
-static constexpr unsigned STATUS_ROWS = 6;
+static constexpr unsigned STATUS_ROWS = 7;
 static String lastStatus[STATUS_ROWS];
 static bool rowDirty[STATUS_ROWS] = {};
 static bool statusDirty = true;
@@ -131,7 +131,7 @@ bool LCD_ClearRow(uint16_t row, uint8_t textSize) {
 }
 
 void LCD_DrawStatus(float voltage, int percent, const char *timeLabel,
-                     const char *wifiLabel, const char *ipLabel) {
+                     const char *wifiLabel, const char *ipLabel, const char *cameraIP) {
   if (textMode) return;
 
   // Fixed row assignments; the optional invalid-version row stays reserved.
@@ -143,6 +143,8 @@ void LCD_DrawStatus(float voltage, int percent, const char *timeLabel,
   if (invalidVersion) rows[3] = String("max fw V") + invalidVersion + " - invalid";
   rows[4] = String("WIFI ") + ((wifiLabel && *wifiLabel) ? wifiLabel : "disconnected");
   rows[5] = String("IP ") + ((ipLabel && *ipLabel) ? ipLabel : "disconnected");
+
+  rows[6] = String("CAM ") + ((cameraIP && *cameraIP) ? cameraIP : "waiting");
 
   if (statusDirty) tft.fillScreen(backgroundColor);
   tft.setTextWrap(false);

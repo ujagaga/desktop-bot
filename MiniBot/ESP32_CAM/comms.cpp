@@ -1,17 +1,21 @@
 #include "comms.h"
 #include "config.h"
 #include "logger.h"
+#include <WiFi.h>
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
+#include "camera.h"
+#include "http_server.h"
+#include "http_client.h"
+#include <strings.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <freertos/timers.h>
 #include <freertos/queue.h>
 
 std::atomic<uint32_t> COMMS_peerWifiIP{0};
-static std::atomic<bool> pollDue{true};
-static TimerHandle_t pollTimer = nullptr;
 static TaskHandle_t rxTask = nullptr;
 static QueueHandle_t commandQueue = nullptr;
-static std::atomic<uint32_t> consoleUntil{0};
+static std::atomic<bool> sleepRequested{false}, rxPaused{false};
 static portMUX_TYPE consoleMux = portMUX_INITIALIZER_UNLOCKED;
 static char transcript[4096];
 static size_t transcriptHead = 0, transcriptCount = 0;
@@ -29,7 +33,7 @@ static void consoleAppend(const char *text) {
 bool COMMS_IsReady() { return rxTask != nullptr; }
 
 bool COMMS_SendCommand(const char *command) {
-  if (!COMMS_IsReady() || !command || !*command || strlen(command) > 127) return false;
+  if (!COMMS_IsReady() || sleepRequested.load() || !command || !*command || strlen(command) > 127) return false;
   bool nonSpace = false;
   for (const char *p = command; *p; ++p) {
     if ((unsigned char)*p < 32 || (unsigned char)*p > 126) return false;
@@ -38,12 +42,10 @@ bool COMMS_SendCommand(const char *command) {
   if (!nonSpace) return false;
   char queued[128] = {};
   strcpy(queued, command);
-  consoleUntil.store(millis() + 30000);
   return xQueueSend(commandQueue, queued, 0) == pdPASS;
 }
 
 String COMMS_ConsoleRead() {
-  consoleUntil.store(millis() + 30000);
   // Allocate outside the critical section and off the HTTP task's stack.
   char *snapshot = (char *)malloc(sizeof(transcript) + 1);
   if (!snapshot) return String("ERR cannot allocate console snapshot\n");
@@ -59,8 +61,8 @@ String COMMS_ConsoleRead() {
 }
 
 // Accept only a complete dotted-decimal IPv4 line, never OK/ERR or log text.
-static uint32_t parseIP(const char *line) {
-  uint32_t address = 0;
+static bool parseIP(const char *line, uint32_t &address) {
+  address = 0;
   for (unsigned octet = 0; octet < 4; ++octet) {
     unsigned value = 0, digits = 0;
     while (*line >= '0' && *line <= '9') {
@@ -72,14 +74,65 @@ static uint32_t parseIP(const char *line) {
     if (octet < 3 && *line++ != '.') return 0;
   }
   if (*line || address == 0xffffffffUL) return 0;
-  return address;
+  return true;
+}
+
+// Dispatch recognized command families only: other lines may be replies to
+// commands sent from the console, so never answer them with another error.
+static bool dispatchCommand(const char *line) {
+  char command[16], argument[16], addressText[16], extra[2];
+  int fields = sscanf(line, "%15s %15s %15s %1s", command, argument, addressText, extra);
+  if (fields < 1) return false;
+  if (!strcasecmp(command, "sleep")) {
+    if (fields != 1) Serial.println("ERR CAM SLEEP expected sleep without arguments");
+    else if (HTTPC_fwUpdateInProgress()) Serial.println("ERR CAM SLEEP firmware update busy");
+    else if (digitalRead(CAM_WAKE_GPIO)) Serial.println("ERR CAM SLEEP wake line is HIGH");
+    else sleepRequested.store(true); // Main loop joins HTTP/camera work before ACK.
+    return true;
+  }
+  if (!strcasecmp(command, "report")) {
+    uint32_t address;
+    if (fields != 3 || strcasecmp(argument, "ip") || !parseIP(addressText, address)) {
+      Serial.println("ERR report ip <s3 ip addr>");
+      consoleAppend("\n[reply] ERR report ip <s3 ip addr>\n");
+      return true;
+    }
+    COMMS_peerWifiIP.store(address); // Refresh on every report, including disconnects.
+    LOG_printf("S3 reported IP: %s", addressText);
+    String ownIP = (WiFi.status() == WL_CONNECTED ? WiFi.localIP() : IPAddress(0, 0, 0, 0)).toString();
+    Serial.println(ownIP);
+    Serial.println("OK");
+    consoleAppend("\n[reply] ");
+    consoleAppend(ownIP.c_str());
+    consoleAppend("\nOK\n");
+    return true;
+  }
+  if (strcasecmp(command, "wifi")) return false;
+  if (fields == 2 && !strcasecmp(argument, "ip")) {
+    String address = (WiFi.status() == WL_CONNECTED ? WiFi.localIP() : IPAddress(0, 0, 0, 0)).toString();
+    Serial.println(address);
+    Serial.println("OK");
+    consoleAppend("\n[reply] ");
+    consoleAppend(address.c_str());
+    consoleAppend("\nOK\n");
+  } else {
+    Serial.println("ERR wifi <ip>");
+    consoleAppend("\n[reply] ERR wifi <ip>\n");
+  }
+  return true;
 }
 
 static void receiveTask(void *) {
   char line[128];
   size_t length = 0;
-  bool discard = false, requested = false;
+  bool discard = false;
   for (;;) {
+    if (sleepRequested.load()) {
+      rxPaused.store(true);
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+    rxPaused.store(false);
     // Bound each batch so continuous input still allows the task to yield.
     for (unsigned count = 0; count < 256 && Serial.available(); ++count) {
       int byte = Serial.read();
@@ -91,13 +144,9 @@ static void receiveTask(void *) {
         consoleAppend(visible);
       }
       if (byte == '\r' || byte == '\n') {
-        if (!discard && length && requested && !COMMS_peerWifiIP.load()) {
+        if (!discard && length) {
           line[length] = 0;
-          uint32_t address = parseIP(line);
-          if (address) {
-            COMMS_peerWifiIP.store(address);
-            LOG_printf("S3 Wi-Fi IP: %s", COMMS_GetPeerWifiIP().c_str());
-          }
+          dispatchCommand(line);
         }
         length = 0;
         discard = false;
@@ -107,6 +156,7 @@ static void receiveTask(void *) {
         line[length++] = (char)byte;
       }
     }
+    if (sleepRequested.load()) continue;
     char command[128];
     if (xQueueReceive(commandQueue, command, 0) == pdPASS) {
       consoleAppend("\n> ");
@@ -115,23 +165,16 @@ static void receiveTask(void *) {
       Serial.print(command);
       Serial.print("\n");
     }
-    uint32_t until = consoleUntil.load();
-    bool consoleOpen = until && (int32_t)(millis() - until) < 0;
-    if (until && !consoleOpen) consoleUntil.compare_exchange_strong(until, 0);
-    if (COMMS_peerWifiIP.load()) {
-      // Retry a stop if the timer command queue was temporarily full.
-      if (xTimerIsTimerActive(pollTimer)) xTimerStop(pollTimer, 0);
-    } else if (!consoleOpen && pollDue.exchange(false)) {
-      consoleAppend("\n[poll] > wifi ip\n");
-      Serial.print("wifi ip\n");
-      requested = true;
-    }
     vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
 bool COMMS_Init() {
   if (rxTask) return true;
+  rtc_gpio_hold_dis((gpio_num_t)CAM_POWER_DOWN_GPIO);
+  rtc_gpio_deinit((gpio_num_t)CAM_POWER_DOWN_GPIO);
+  rtc_gpio_deinit((gpio_num_t)CAM_WAKE_GPIO);
+  pinMode(CAM_WAKE_GPIO, INPUT_PULLDOWN);
   if (!commandQueue) commandQueue = xQueueCreate(1, 128);
   if (!commandQueue) {
     LOG_append("ERR UART command queue allocation failed");
@@ -145,26 +188,13 @@ bool COMMS_Init() {
   }
   Serial.setDebugOutput(false);
   Serial.print("\n"); // Terminate any partial boot output seen by the S3.
-  pollDue.store(true);
-  // Timer callbacks never perform serial I/O or wait for a response.
-  pollTimer = xTimerCreate("s3WifiIP", pdMS_TO_TICKS(COMMS_IP_POLL_MS), pdTRUE,
-                          nullptr, [](TimerHandle_t) { pollDue.store(true); });
-  if (!pollTimer || xTimerStart(pollTimer, 0) != pdPASS) {
-    if (pollTimer) xTimerDelete(pollTimer, portMAX_DELAY);
-    pollTimer = nullptr;
-    Serial.end();
-    LOG_append("ERR UART IP poll timer startup failed");
-    return false;
-  }
   // No camera locks, HTTP handlers, or loop() work in the RX task.
   if (xTaskCreate(receiveTask, "commsRx", 3072, nullptr, 2, &rxTask) != pdPASS) {
-    xTimerDelete(pollTimer, portMAX_DELAY);
-    pollTimer = nullptr;
     Serial.end();
     LOG_append("ERR UART RX task startup failed");
     return false;
   }
-  LOG_append("UART ready; discovering S3 Wi-Fi IP");
+  LOG_append("UART ready; waiting for S3 report ip");
   return true;
 }
 
@@ -176,4 +206,39 @@ String COMMS_GetPeerWifiIP() {
            (unsigned)((address >> 16) & 255), (unsigned)((address >> 8) & 255),
            (unsigned)(address & 255));
   return String(text);
+}
+
+// Main-loop only: never tear down the camera or HTTP server from the RX task.
+void COMMS_ProcessSleep() {
+  if (!sleepRequested.load() || !rxPaused.load()) return;
+  const gpio_num_t wakePin = (gpio_num_t)CAM_WAKE_GPIO;
+  if (HTTPC_fwUpdateInProgress() || digitalRead(CAM_WAKE_GPIO) ||
+      esp_sleep_enable_ext0_wakeup(wakePin, 1) != ESP_OK) {
+    Serial.println("ERR CAM SLEEP unavailable or wake line HIGH");
+    sleepRequested.store(false);
+    return;
+  }
+  LOG_append("CAM preparing for deep sleep");
+  HTTPSRV_stop();
+  CAM_Stop();
+  // A timed-out S3 keeps the wake line HIGH. Restart if it cancelled while
+  // handlers were shutting down; never enter sleep with a stale request.
+  if (digitalRead(CAM_WAKE_GPIO)) {
+    Serial.println("ERR CAM SLEEP cancelled");
+    Serial.flush();
+    ESP.restart();
+    return;
+  }
+  WiFi.mode(WIFI_OFF);
+  rtc_gpio_pullup_dis(wakePin);
+  rtc_gpio_pulldown_en(wakePin);
+  // Keep the OV2640 powered down throughout deep sleep.
+  const gpio_num_t powerPin = (gpio_num_t)CAM_POWER_DOWN_GPIO;
+  rtc_gpio_init(powerPin);
+  rtc_gpio_set_direction(powerPin, RTC_GPIO_MODE_OUTPUT_ONLY);
+  rtc_gpio_set_level(powerPin, 1);
+  rtc_gpio_hold_en(powerPin);
+  Serial.println("CAM SLEEP READY");
+  Serial.flush();
+  esp_deep_sleep_start();
 }

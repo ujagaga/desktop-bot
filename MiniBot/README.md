@@ -29,6 +29,7 @@ Wi-Fi access and the HTTP API.
 | IMU INT2 | 45, currently unused |
 | Command UART RX | 14 |
 | Command UART TX | 13 |
+| CAM wake output (to CAM GPIO13) | 7 |
 | Motor 1 | 9 / 10 |
 | Motor 2 | 11 / 12 |
 | Battery ADC | 6 |
@@ -38,6 +39,22 @@ Wi-Fi access and the HTTP API.
 | LCD DC | 38 |
 | LCD RST | 42 |
 | LCD backlight | 20 |
+
+Once S3 has a station IP, its five-second timer sends `report ip <s3 ip addr>`
+to CAM until it receives a nonzero CAM address. CAM saves the supplied S3 address
+and replies with its own IP followed by `OK`, updating both modules in one exchange. The LCD status screen shows that address
+on a `CAM` row (or `CAM waiting` before discovery). IPv4 replies and `OK`/`ERR`
+on this port are consumed separately from incoming commands. The cached CAM
+address is rediscovered after S3 wake/reboot or an S3 station address change.
+CAM no longer polls S3. Use `lcd status` to return from custom displays.
+
+Sleep is coordinated with the CAM: S3 shows `08_sleepy`, drives GPIO7 LOW,
+sends `sleep`, and waits up to ten seconds for `CAM SLEEP READY`. It keeps the
+face visible for at least three seconds before turning off the display and
+entering light sleep. Missing/rejected acknowledgment cancels S3 sleep.
+GPIO7 is held LOW during sleep and raised HIGH on confirmed wake or cancellation,
+waking CAM GPIO13 from deep sleep. Connect common ground and a 10 kΩ pull-down
+on CAM GPIO13. S3 then restores its status screen and rediscovers the CAM IP.
 
 The command interface is available through USB `Serial` and the GPIO UART `Serial2` at `115200` baud. Commands are ASCII lines terminated by a newline and are case-insensitive. Keep
 commands to 127 bytes, excluding the newline. Successful commands end with `OK`;

@@ -1,3 +1,4 @@
+#include "comms.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <stdio.h>
@@ -60,7 +61,8 @@ void BATT_ShowStatus() {
 
   LCD_DrawStatus(voltage, percent, timeLabel,
               (WiFi.status() == WL_CONNECTED) ? wifiLabel : nullptr,
-              (WiFi.status() == WL_CONNECTED) ? ipLabel : nullptr);
+              (WiFi.status() == WL_CONNECTED) ? ipLabel : nullptr,
+              COMMS_GetCameraIP());
 }
 
 void BATT_process(){

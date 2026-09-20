@@ -18,6 +18,7 @@ void setup() {
   HTTPSRV_init();
 }
 void loop() {
+  COMMS_ProcessSleep();
   WIFIC_process();
   HTTPC_process();
   delay(50);

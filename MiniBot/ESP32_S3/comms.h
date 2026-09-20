@@ -14,4 +14,7 @@ void COMMS_Poll();
 // OK/ERR, are written to output using the same dispatcher as both serial ports.
 void COMMS_Execute(const char *command, Print &output);
 
+// Cached CAM station address, empty until discovered. Read from loop context.
+const char *COMMS_GetCameraIP();
+
 #endif
