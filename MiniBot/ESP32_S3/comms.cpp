@@ -272,14 +272,19 @@ static bool cmdCalibrate(Print *output, const char *args) {
 
 static bool cmdGyroThreshold(Print *output, const char *args) {
   if (*args) {
-    // Exactly one decimal digit, optionally followed by whitespace.
-    const char *end = args + 1;
+    const char *end = args;
+    unsigned int increment = 0;
+    while (*end >= '0' && *end <= '9') {
+      increment = increment * 10 + (*end++ - '0');
+      if (increment > 100) break; // Bound accumulation before it can overflow.
+    }
+    bool hasDigits = end != args;
     while (isspace((unsigned char)*end)) ++end;
-    if (*args < '0' || *args > '9' || *end) {
-      output->println("ERR gyro threshold [0-9]");
+    if (!hasDigits || increment > 100 || *end) {
+      output->println("ERR gyro threshold [0-100]");
       return false;
     }
-    if (!GYRO_SetWakeThreshold(*args - '0')) {
+    if (!GYRO_SetWakeThreshold(increment)) {
       output->println("ERR cannot save gyro threshold; unchanged");
       return false;
     }
@@ -365,7 +370,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt v");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
-  output->println("  gyro threshold [0-9]");
+  output->println("  gyro threshold [0-100]");
   output->println("  gyro rate <x|y|z|0|1|2>");
   output->println("  lcd bl <0-100>");
   output->println("  lcd clear");

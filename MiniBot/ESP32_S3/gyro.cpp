@@ -32,8 +32,8 @@ static bool motionArmed = false;
 static bool savedBiasValid = false;
 static float savedBias[3] = {};
 
-static_assert(GYRO_WAKE_THRESHOLD_MG > 0 && GYRO_WAKE_THRESHOLD_MG <= 246,
-              "Motion threshold base must leave room for a 0-9 mg adjustment");
+static_assert(GYRO_WAKE_THRESHOLD_MG > 0 && GYRO_WAKE_THRESHOLD_MG <= 155,
+              "Motion threshold base must leave room for a 0-100 mg adjustment");
 static uint8_t wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG;
 
 static void loadWakeThreshold() {
@@ -50,7 +50,7 @@ uint8_t GYRO_GetWakeThreshold() {
 }
 
 bool GYRO_SetWakeThreshold(uint8_t increment) {
-  if (increment > 9) return false;
+  if (increment > 100) return false;
   uint8_t value = GYRO_WAKE_THRESHOLD_MG + increment;
   Preferences prefs;
   if (!prefs.begin("miniBotGyro", false)) return false;

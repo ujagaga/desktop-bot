@@ -360,7 +360,7 @@ in `ESP32_S3/`, not the generated `.cache/sketch/` copies.
 
 `gyro threshold` reports the current motion wake threshold in mg.
 `gyro threshold 3` sets it to `GYRO_WAKE_THRESHOLD_MG + 3` (23 mg with the
-current 20 mg base). The accepted adjustment is one digit, 0 through 9; it is
+current 20 mg base). The accepted adjustment is an integer from 0 through 100; it is
 always relative to config, not the previous setting. Higher values require
 more movement to wake.
 

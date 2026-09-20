@@ -43,7 +43,7 @@ form{display:flex;gap:.5rem}input{flex:1;min-width:0}input,button{font:inherit;p
 </head>
 <body>
 <h1>MiniBot console</h1>
-<p>Enter a serial command. Use <code>help</code> to list commands.</p>
+<p>Enter a serial command. Use <code>help</code> to list commands. Use Up/Down arrows to recall the last 10 commands.</p>
 <pre id="output" role="log" aria-live="polite"></pre>
 <form id="console" action="/command" method="get">
 <input id="command" name="cmd" aria-label="Command" placeholder="help" maxlength="127" autocomplete="off" required autofocus>
@@ -55,11 +55,40 @@ const form=document.getElementById('console');
 const input=document.getElementById('command');
 const output=document.getElementById('output');
 const send=document.getElementById('send');
+const historyKey='minibot.commandHistory';
+let commandHistory=[];
+try{
+  const saved=JSON.parse(localStorage.getItem(historyKey)||'[]');
+  if(Array.isArray(saved))commandHistory=saved.filter(command=>
+    typeof command==='string' && command.trim() && command.length<=127 &&
+    !/[\r\n\0]/.test(command)).slice(-10);
+}catch(error){/* History remains usable when browser storage is unavailable. */}
+let historyIndex=commandHistory.length;
+let draft='';
+input.addEventListener('keydown',event=>{
+  if(event.isComposing || (event.key!=='ArrowUp' && event.key!=='ArrowDown'))return;
+  event.preventDefault();
+  if(!commandHistory.length)return;
+  if(event.key==='ArrowUp'){
+    if(historyIndex===commandHistory.length)draft=input.value;
+    historyIndex=Math.max(0,historyIndex-1);
+  }else{
+    if(historyIndex===commandHistory.length)return;
+    historyIndex=Math.min(commandHistory.length,historyIndex+1);
+  }
+  input.value=historyIndex===commandHistory.length?draft:commandHistory[historyIndex];
+  input.setSelectionRange(input.value.length,input.value.length);
+});
 function append(text){output.textContent=(output.textContent+text).slice(-32768);output.scrollTop=output.scrollHeight;}
 form.addEventListener('submit',async event=>{
   event.preventDefault();
   const command=input.value;
-  if(!command.trim())return;
+  if(!command.trim() || input.disabled)return;
+  commandHistory.push(command);
+  commandHistory=commandHistory.slice(-10);
+  historyIndex=commandHistory.length;
+  draft='';
+  try{localStorage.setItem(historyKey,JSON.stringify(commandHistory));}catch(error){}
   append('> '+command+'\n');
   input.disabled=true;send.disabled=true;
   try{
