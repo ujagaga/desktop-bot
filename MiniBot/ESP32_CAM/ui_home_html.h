@@ -126,7 +126,7 @@ $('wifi-form').onsubmit=async event=>{
   try{message(await request('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:$('wifi-mode').value,ssid:$('wifi-ssid').value,password:$('wifi-pass').value})}));$('wifi-pass').value='';}
   catch(e){message(e.message);}
 };
-function showWifi(state){$('wifi-status').textContent=state.connected?'Connected at '+state.ip:'Setup AP '+state.ap_ssid+' at '+state.ap_ip;}
+function showWifi(state){$('wifi-status').textContent=(state.connected?'Connected at '+state.ip:'Setup AP '+state.ap_ssid+' at '+state.ap_ip)+' · S3 Wi-Fi IP: '+(state.s3_ip||'Waiting for UART response…');}
 async function loadWifi(){try{const state=JSON.parse(await request('/api/wifi'));
   $('wifi-mode').value=state.mode;$('wifi-ssid').value=state.ssid;
   showWifi(state);

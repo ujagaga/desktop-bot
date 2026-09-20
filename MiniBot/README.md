@@ -27,8 +27,8 @@ Wi-Fi access and the HTTP API.
 | IMU SCL | 48 |
 | IMU INT1 (motion wake) | 46 |
 | IMU INT2 | 45, currently unused |
-| Command UART RX | 13 |
-| Command UART TX | 14 |
+| Command UART RX | 14 |
+| Command UART TX | 13 |
 | Motor 1 | 9 / 10 |
 | Motor 2 | 11 / 12 |
 | Battery ADC | 6 |

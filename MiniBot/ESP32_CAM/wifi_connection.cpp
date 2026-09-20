@@ -1,5 +1,6 @@
 #include "wifi_connection.h"
 #include "config.h"
+#include "comms.h"
 #include "logger.h"
 #include <WiFi.h>
 #include <Preferences.h>
@@ -107,5 +108,6 @@ String WIFIC_status() {
   doc["ip"] = WiFi.localIP().toString();
   doc["ap_ssid"] = WIFI_AP_SSID;
   doc["ap_ip"] = WiFi.softAPIP().toString();
+  doc["s3_ip"] = COMMS_GetPeerWifiIP();
   String result; serializeJson(doc, result); return result;
 }

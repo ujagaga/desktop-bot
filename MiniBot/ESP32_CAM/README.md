@@ -25,6 +25,23 @@ passwords may contain spaces. An empty password selects an open network; otherwi
 use 8–63 bytes. SSIDs are limited to 32 bytes. Passwords are not returned by the
 HTTP API or written to logs. There is no UART setup requirement after flashing.
 
+### S3 UART link
+
+The CAM uses `Serial2` at 115200 baud (8N1), with RX GPIO14 connected to
+S3 TX GPIO13 and TX GPIO13 connected to S3 RX GPIO14, plus common ground.
+The CAM pins and two-second polling interval are configurable in `config.h`.
+These pins cannot also be used for an SD card.
+
+An independent FreeRTOS task starts before camera initialization and drains
+UART input even while capture/streaming or the main loop is busy. A software
+timer schedules `wifi ip` requests until a nonzero IPv4 reply arrives;
+`0.0.0.0`, `OK`, errors and malformed lines do not stop discovery. RX remains
+active after the timer stops. The address is cached in the atomic global
+`COMMS_peerWifiIP`; `COMMS_GetPeerWifiIP()` returns a thread-safe text snapshot.
+`GET /api/wifi` includes it as `s3_ip` (empty before discovery), and the Wi-Fi
+section refreshes it automatically. The cached address lasts until reboot;
+discovery does not monitor subsequent S3 address changes.
+
 The AP chooses a quiet channel among 1, 6 and 11 at startup. When the station
 connects, the ESP32's shared radio follows the station network's channel; AP
 clients may need to reconnect. Power saving is disabled for camera streaming.
