@@ -30,6 +30,10 @@ static int updatePercent = -1;
 static uint16_t backgroundColor = LCD_BACKGROUND_COLOR;
 static uint16_t foregroundColor = LCD_TEXT_COLOR;
 static String lastText, lastTime, lastDate;
+static constexpr unsigned STATUS_ROWS = 6;
+static String lastStatus[STATUS_ROWS];
+static bool rowDirty[STATUS_ROWS] = {};
+static bool statusDirty = true;
 enum class Content { Status, Text, Time, Update };
 static Content content = Content::Status;
 
@@ -41,6 +45,7 @@ bool LCD_SetColor(bool background, uint16_t color) {
             prefs.putUShort(key, color) == sizeof(color);
   prefs.end();
   if (!ok) return false;
+  statusDirty = true;
   if (background) backgroundColor = color;
   else foregroundColor = color;
   if (content == Content::Text) LCD_ShowText(lastText.c_str());
@@ -84,66 +89,96 @@ void LCD_BacklightRestore() {
 }
 
 void LCD_SetRotation(int rotation) {
+  statusDirty = true;
   if (rotation < 0) rotation = 0;
   if (rotation > 3) rotation = 3;
   tft.setRotation(rotation);
 }
 
 void LCD_Clear() {
+  statusDirty = true;
   content = Content::Status;
   tft.fillScreen(backgroundColor);
   textMode = false;
+}
+
+static bool rowGeometry(uint16_t row, uint8_t size, int16_t &y, int16_t &height) {
+  if (!size) return false;
+  uint32_t pitch = 8U * size + LCD_ROW_GAP;
+  uint32_t top = LCD_ROW_TOP + (uint32_t)row * pitch;
+  if (top + 8U * size > (uint32_t)tft.height()) return false;
+  y = top;
+  height = min((uint32_t)tft.height() - top, pitch);
+  return true;
+}
+
+bool LCD_SetRow(uint16_t row, uint8_t textSize) {
+  int16_t y, height;
+  if (!rowGeometry(row, textSize, y, height)) return false;
+  tft.setTextSize(textSize);
+  tft.setTextColor(foregroundColor);
+  tft.setCursor(LCD_ROW_LEFT, y);
+  return true;
+}
+
+bool LCD_ClearRow(uint16_t row, uint8_t textSize) {
+  int16_t y, height;
+  if (!rowGeometry(row, textSize, y, height)) return false;
+  tft.fillRect(0, y, tft.width(), height, backgroundColor);
+  if (textSize == LCD_DEFAULT_TEXT_SIZE && row < STATUS_ROWS) rowDirty[row] = true;
+  else statusDirty = true;
+  return true;
 }
 
 void LCD_DrawStatus(float voltage, int percent, const char *timeLabel,
                      const char *wifiLabel, const char *ipLabel) {
   if (textMode) return;
 
-  tft.setTextColor(foregroundColor);
-  tft.setTextSize(2);
-  tft.setCursor(10, 20);
-
-  String textContent = "Firmware V";
-  textContent += FIRMWARE_VERSION;
-  textContent += "\n";
-
+  // Fixed row assignments; the optional invalid-version row stays reserved.
+  String rows[STATUS_ROWS];
+  rows[0] = "BAT " + String(percent) + "%  " + String(voltage, 2) + "V";
+  rows[1] = String("TIME ") + ((timeLabel && *timeLabel) ? timeLabel : "unavailable");
+  rows[2] = String("Firmware V") + FIRMWARE_VERSION;
   uint32_t invalidVersion = HTTP_CLIENT_GetInvalidVersion();
-  if (invalidVersion) {
+  if (invalidVersion) rows[3] = String("max fw V") + invalidVersion + " - invalid";
+  rows[4] = String("WIFI ") + ((wifiLabel && *wifiLabel) ? wifiLabel : "disconnected");
+  rows[5] = String("IP ") + ((ipLabel && *ipLabel) ? ipLabel : "disconnected");
 
-    char label[40];
-    snprintf(label, sizeof(label), "max fw V%lu - invalid", (unsigned long)invalidVersion);
-    textContent += label;
-    textContent += "\n";
+  if (statusDirty) tft.fillScreen(backgroundColor);
+  tft.setTextWrap(false);
+  unsigned columns = (tft.width() - LCD_ROW_LEFT) / (6U * LCD_DEFAULT_TEXT_SIZE);
+  for (unsigned row = 0; row < STATUS_ROWS; ++row) {
+    if (!statusDirty && !rowDirty[row] && lastStatus[row] == rows[row]) continue;
+    LCD_ClearRow(row);
+    if (LCD_SetRow(row)) {
+      // Never let long SSIDs or embedded newlines move the following rows.
+      for (unsigned col = 0; col < rows[row].length() && col < columns; ++col) {
+        char c = rows[row][col];
+        tft.write((uint8_t)((c == '\r' || c == '\n') ? ' ' : c));
+      }
+    }
+    lastStatus[row] = rows[row];
+    rowDirty[row] = false;
   }
-
-  textContent += "BAT " + String(percent) + "%  " + String(voltage, 2) + "V\n";
-
-  textContent += "TIME ";
-  textContent += (timeLabel != nullptr && timeLabel[0] != '\0') ? timeLabel : "unavailable";
-  textContent += "\n";
-  textContent += "WIFI ";
-  textContent += (wifiLabel != nullptr && wifiLabel[0] != '\0') ? wifiLabel : "disconnected";
-  textContent += "\n";
-  textContent += "IP ";
-  textContent += (ipLabel != nullptr && ipLabel[0] != '\0') ? ipLabel : "disconnected";
-
-  tft.print(textContent);
-
+  tft.setTextWrap(true);
+  statusDirty = false;
 }
 
 void LCD_ShowText(const char *text) {
+  statusDirty = true;
   lastText = text ? text : "";
   text = lastText.c_str();
   content = Content::Text;
   textMode = true;
   tft.fillScreen(backgroundColor);
   tft.setTextColor(foregroundColor);
-  tft.setTextSize(2);
+  tft.setTextSize(LCD_DEFAULT_TEXT_SIZE);
   tft.setCursor(0, 0);
   if (text != nullptr) tft.print(text);
 }
 
 void LCD_ShowTime(const char *timeText, const char *dateText) {
+  statusDirty = true;
   lastTime = timeText ? timeText : "";
   lastDate = dateText ? dateText : "";
   timeText = lastTime.c_str();
@@ -157,7 +192,7 @@ void LCD_ShowTime(const char *timeText, const char *dateText) {
   tft.setCursor(30, 62);
   if (timeText != nullptr) tft.print(timeText);
 
-  tft.setTextSize(2);
+  tft.setTextSize(LCD_DEFAULT_TEXT_SIZE);
   tft.setCursor(10, 210);
   if (dateText != nullptr) tft.print(dateText);
 }
@@ -165,7 +200,7 @@ void LCD_ShowTime(const char *timeText, const char *dateText) {
 void LCD_UpdateStatus(const char *status) {
   tft.fillRect(10, 180, 220, 48, backgroundColor);
   tft.setTextColor(foregroundColor);
-  tft.setTextSize(2);
+  tft.setTextSize(LCD_DEFAULT_TEXT_SIZE);
   tft.setCursor(12, 184);
   tft.print(status);
 }
@@ -187,12 +222,13 @@ void LCD_UpdateProgress(int percent) {
 }
 
 void LCD_UpdateBegin(unsigned long version) {
+  statusDirty = true;
   content = Content::Update;
   textMode = true;
   updatePercent = -1;
   tft.fillScreen(backgroundColor);
   tft.setTextColor(foregroundColor);
-  tft.setTextSize(2);
+  tft.setTextSize(LCD_DEFAULT_TEXT_SIZE);
   tft.setCursor(30, 24);
   tft.print("Firmware update");
   tft.setCursor(12, 58);
