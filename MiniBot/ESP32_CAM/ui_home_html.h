@@ -20,6 +20,12 @@ button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}section,details{bac
 #camera-settings label.inactive{opacity:.45}
 @media(max-width:900px){.camera-row{grid-template-columns:1fr;gap:12px}}
 pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{min-height:1.5em;color:#67d5ec}summary{cursor:pointer;font-size:1.2em}
+#wifi-form{display:grid;gap:12px;max-width:620px}
+#wifi-form label{display:grid;grid-template-columns:100px minmax(0,1fr);align-items:center;gap:16px;min-width:0}
+#wifi-form input,#wifi-form select{box-sizing:border-box;width:100%;min-width:0;margin:0}
+#wifi-form p{margin:0 0 0 116px;line-height:1.5;color:#bac5d1}
+#wifi-form button{justify-self:start;margin:0 0 0 116px}
+@media(max-width:480px){#wifi-form label{grid-template-columns:1fr;gap:6px}#wifi-form p,#wifi-form button{margin-left:0}}
 </style></head><body>
 <h1>MiniBot CAM <small id="info"></small></h1>
 <p><a href="/api">HTTP API</a> · <a href="/capture" target="_blank">Snapshot</a></p>
@@ -30,10 +36,9 @@ pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{
 <div id="camera-settings"></div><button id="save-camera">Save camera settings</button></fieldset>
 <p>Changes apply immediately. Save to keep them after restart. Lower JPEG quality numbers give better image quality and larger frames.</p></details>
 <section><h2>Wi-Fi</h2><p id="wifi-status"></p>
-<form id="wifi-form"><label>Mode <select id="wifi-mode"><option value="station">Station + setup AP</option><option value="ap">Access point only</option></select></label><br>
-<label>SSID <input id="wifi-ssid" maxlength="32" autocomplete="off"></label><br>
+<form id="wifi-form"><label>Mode <select id="wifi-mode"><option value="station">Station + setup AP</option><option value="ap">Access point only</option></select></label>
+<label>SSID <input id="wifi-ssid" maxlength="32" autocomplete="off"></label>
 <label>Password <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password"></label>
-<p>Re-enter the password to save station settings; leave blank for an open network. The setup AP remains available at 192.168.4.1.</p>
 <button type="submit">Save Wi-Fi settings</button></form></section>
 <section><h2>Device log</h2><pre id="logs"></pre></section>
 <script>
