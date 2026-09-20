@@ -32,6 +32,36 @@ static bool motionArmed = false;
 static bool savedBiasValid = false;
 static float savedBias[3] = {};
 
+static_assert(GYRO_WAKE_THRESHOLD_MG > 0 && GYRO_WAKE_THRESHOLD_MG <= 246,
+              "Motion threshold base must leave room for a 0-9 mg adjustment");
+static uint8_t wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG;
+
+static void loadWakeThreshold() {
+  wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG;
+  Preferences prefs;
+  if (!prefs.begin("miniBotGyro", true)) return;
+  uint8_t saved = prefs.getUChar("wake_mg", GYRO_WAKE_THRESHOLD_MG);
+  prefs.end();
+  if (saved != 0) wakeThresholdMg = saved;
+}
+
+uint8_t GYRO_GetWakeThreshold() {
+  return wakeThresholdMg;
+}
+
+bool GYRO_SetWakeThreshold(uint8_t increment) {
+  if (increment > 9) return false;
+  uint8_t value = GYRO_WAKE_THRESHOLD_MG + increment;
+  Preferences prefs;
+  if (!prefs.begin("miniBotGyro", false)) return false;
+  // Compare with NVS, so the first explicit setting is saved, even at default.
+  bool ok = prefs.getUChar("wake_mg", 0) == value ||
+            prefs.putUChar("wake_mg", value) == sizeof(value);
+  prefs.end();
+  if (ok) wakeThresholdMg = value;
+  return ok;
+}
+
 static void loadBias() {
   Preferences prefs;
   if (!prefs.begin("miniBotGyro", true)) return;
@@ -123,7 +153,7 @@ bool GYRO_PrepareForSleep() {
          writeRegister(deviceAddress, 0x09, 0x80) &&
          // +/-2g, 128 Hz low-power accelerometer; gyro is disabled.
          writeRegister(deviceAddress, 0x03, 0x0C) &&
-         setMotionThreshold(GYRO_WAKE_THRESHOLD_MG) &&
+         setMotionThreshold(wakeThresholdMg) &&
          readRegister(deviceAddress, 0x2F, &status) &&
          writeRegister(deviceAddress, GYRO_REG_CTRL7, 0x01) &&
          gpio_wakeup_enable((gpio_num_t)GYRO_MOTION_WAKE_GPIO, GPIO_INTR_HIGH_LEVEL) == ESP_OK &&
@@ -168,6 +198,7 @@ static bool readAxisRaw(int axis, int16_t *rawValue) {
 }
 
 void GYRO_Init() {
+  loadWakeThreshold();
   loadBias();
   Wire.begin(GYRO_SDA_PIN, GYRO_SCL_PIN);
   Wire.setClock(400000);

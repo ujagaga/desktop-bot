@@ -270,22 +270,41 @@ static bool cmdCalibrate(Print *output, const char *args) {
   return true;
 }
 
+static bool cmdGyroThreshold(Print *output, const char *args) {
+  if (*args) {
+    // Exactly one decimal digit, optionally followed by whitespace.
+    const char *end = args + 1;
+    while (isspace((unsigned char)*end)) ++end;
+    if (*args < '0' || *args > '9' || *end) {
+      output->println("ERR gyro threshold [0-9]");
+      return false;
+    }
+    if (!GYRO_SetWakeThreshold(*args - '0')) {
+      output->println("ERR cannot save gyro threshold; unchanged");
+      return false;
+    }
+  }
+  output->printf("GYRO THRESHOLD %u mg\n", (unsigned)GYRO_GetWakeThreshold());
+  return true;
+}
+
 static bool cmdGyro(Print *output, const char *args) {
   char subcmd[16];
   const char *subargs = args;
   if (sscanf(args, "%15s", subcmd) != 1) {
-    output->println("ERR gyro <angle|rate|calibrate>");
+    output->println("ERR gyro <angle|rate|calibrate|threshold>");
     return false;
   }
 
   while (*subargs && !isspace(*subargs)) subargs++;
   while (isspace(*subargs)) subargs++;
 
+  if (strcasecmp(subcmd, "threshold") == 0) return cmdGyroThreshold(output, subargs);
   if (strcasecmp(subcmd, "angle") == 0) return cmdAngle(output, subargs);
   if (strcasecmp(subcmd, "rate") == 0) return cmdRate(output, subargs);
   if (strcasecmp(subcmd, "calibrate") == 0) return cmdCalibrate(output, subargs);
 
-  output->println("ERR gyro <angle|rate|calibrate>");
+  output->println("ERR gyro <angle|rate|calibrate|threshold>");
   return false;
 }
 
@@ -346,6 +365,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt v");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
+  output->println("  gyro threshold [0-9]");
   output->println("  gyro rate <x|y|z|0|1|2>");
   output->println("  lcd bl <0-100>");
   output->println("  lcd clear");

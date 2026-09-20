@@ -343,3 +343,27 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 - `ESP32_S3/motor.cpp`: timed motor control
 - `ESP32_S3/wifi_connection.cpp`: stored Wi-Fi credentials and connection management
 - `tools/build_s3.sh`: build and upload script
+
+### VS Code IntelliSense
+
+`tools/build_s3.sh` refreshes the C/C++ include paths, defines, and compiler from
+the actual Arduino build using `tools/update_intellisense.py` (requires Python 3).
+The generated compilation database maps Arduino's cached sketch copies back to
+the editable files under `ESP32_S3/`. To refresh settings without rebuilding,
+run `python3 tools/update_intellisense.py` after a successful build.
+
+If old include errors remain, run **C/C++: Reset IntelliSense Database** from
+the Command Palette, then **Developer: Reload Window**. Edit the files directly
+in `ESP32_S3/`, not the generated `.cache/sketch/` copies.
+
+### Motion wake sensitivity
+
+`gyro threshold` reports the current motion wake threshold in mg.
+`gyro threshold 3` sets it to `GYRO_WAKE_THRESHOLD_MG + 3` (23 mg with the
+current 20 mg base). The accepted adjustment is one digit, 0 through 9; it is
+always relative to config, not the previous setting. Higher values require
+more movement to wake.
+
+The resulting threshold is saved under `miniBotGyro` / `wake_mg` in Preferences,
+loaded on restart, and applied when entering the next sleep. Repeating the
+same value avoids another flash write. Touch sensitivity is unchanged.

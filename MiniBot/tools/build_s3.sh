@@ -27,6 +27,8 @@ command -v arduino-cli >/dev/null 2>&1 || {
 echo "Compiling $SKETCH_DIR for $FQBN ..."
 arduino-cli compile --fqbn "$FQBN" --output-dir "$BUILD_DIR" --build-path "$CACHE_DIR" "$SKETCH_DIR"
 
+python3 "$REPO_DIR/tools/update_intellisense.py"
+
 if [ "${1:-}" = "upload" ]; then
   echo "Uploading to $PORT ..."
   arduino-cli upload --fqbn "$FQBN" -p "$PORT" --input-dir "$BUILD_DIR" "$SKETCH_DIR"
