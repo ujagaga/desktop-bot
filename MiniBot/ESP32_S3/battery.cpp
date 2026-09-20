@@ -2,7 +2,7 @@
 #include <WiFi.h>
 #include <stdio.h>
 #include "battery.h"
-#include "LCD.h"
+#include "lcd.h"
 #include "clock.h"
 
 
@@ -58,7 +58,7 @@ void BATT_ShowStatus() {
     snprintf(ipLabel, sizeof(ipLabel), "%s", ip.c_str());
   }
 
-  LCD_DrawBattery(voltage, percent, timeLabel,
+  LCD_DrawStatus(voltage, percent, timeLabel,
               (WiFi.status() == WL_CONNECTED) ? wifiLabel : nullptr,
               (WiFi.status() == WL_CONNECTED) ? ipLabel : nullptr);
 }

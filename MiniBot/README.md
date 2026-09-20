@@ -23,7 +23,6 @@ MiniBot is an ESP32-S3 robot controller with a 240x240 ST7789 LCD, QMI8658 IMU, 
 | Motor 1 | 9 / 10 |
 | Motor 2 | 11 / 12 |
 | Battery ADC | 6 |
-| Touch sleep/wake pad | 7 |
 | LCD SCLK | 40 |
 | LCD MOSI | 41 |
 | LCD CS | 39 |
@@ -33,38 +32,23 @@ MiniBot is an ESP32-S3 robot controller with a 240x240 ST7789 LCD, QMI8658 IMU, 
 
 The command interface is available through USB `Serial` and the GPIO UART `Serial2` at `115200` baud. Commands are ASCII lines terminated by a newline and are case-insensitive.
 
-## Touch sleep and wake
+## Tap sleep and wake
 
-Connect a capacitive pad to GPIO7. With the pad untouched, run `touch calibrate`
-from serial or the HTTP console. After a two-second settling period, calibration
-is measured and saved in Preferences (NVS), surviving restarts. Startup loads
-the saved baseline without recalibrating. Until calibration is saved, touch
-sleep/wake and the sleep command are disabled. Recalibrate after changing the
-pad or wiring. The command stops motors before sampling; failed or unstable
-measurements leave the previous calibration unchanged. Keep the pad untouched
-for the entire command, including when using HTTP, which buffers the reply.
-Hold it for at least three seconds, then release to enter light sleep. A short
-touch wakes the robot; release the pad before starting another long press.
-The display and Wi-Fi restore through the same handler used by the `sleep`
-command. Motors stop before sleeping. Serial and HTTP sleep also enable touch
-wake; sleep is refused if touch calibration failed or the pad is still held.
+GPIO7 capacitive touch support and its commands have been removed. The IMU
+now groups acceleration impulses into single, double, triple, or longer tap
+sequences. Allow 120–500 ms between taps, and then pause for over 500 ms:
 
-Run `touch measure`, then touch and release the pad to obtain its peak raw
-reading. The command sends `TOUCH MAX <value>` followed by `OK` only after the
-pad has been released for 60 ms. It also accepts a touch already in progress.
-Saved calibration is required to detect touch and release; measurement does
-not change it. If no touch starts within 30 seconds, an error is returned.
-Once touched, measurement waits for release without a hold timeout. Motors
-are stopped, long-press sleep is suspended, and other commands wait until
-measurement finishes. Serial and HTTP use the same behavior.
+- Awake: exactly three taps enter sleep; single/double taps do nothing.
+- Sleeping: a first motion event briefly wakes the CPU with LCD/Wi-Fi off.
+  Two or more taps complete the wake; a lone tap returns to sleep.
+- UART wake remains available. A wake sequence is consumed, so three taps
+  while sleeping do not immediately send the robot back to sleep.
 
-`TOUCH_HOLD_MS` and `TOUCH_THRESHOLD_PERCENT` in `ESP32_S3/config.h` control
-hold duration and sensitivity. The default activation level is 20% above the
-saved baseline, with a lower release threshold and 60 ms debounce. Baseline
-and activation readings are returned by `touch calibrate`. Adjust sensitivity for
-the actual pad and wiring; lower percentages detect smaller changes. Long
-blocking commands/OTA interrupt hold tracking, so release and try again after
-they finish. Wake detection runs in hardware while the CPU sleeps.
+The first sleeping impulse is detected by hardware WoM; subsequent impulses
+are checked in software. Short pulses must return to quiet within 100 ms.
+This is a heuristic and needs tuning/testing on the assembled robot; vibration
+can resemble taps. Long blocking commands and OTA can interrupt awake tap
+sampling. The firmware logs the observed tap count over USB serial.
 
 ## Commands
 
@@ -153,7 +137,7 @@ at startup. If no valid saved bias exists, startup calibrates once. The
 samples. Fresh offsets always take effect in RAM; NVS is written only when
 any axis differs by at least `GYRO_BIAS_SAVE_DELTA_DPS` (default 0.25 degrees/s)
 from its last saved value. Storage failures retain the RAM calibration and
-are logged on USB serial. Wi-Fi and touch use separate namespaces.
+are logged on USB serial. Wi-Fi uses a separate namespace.
 
 A bias is an angular-rate correction, not an angle: 0.25 degrees/s corresponds
 to 5 degrees of drift over 20 seconds. It does not guarantee 5-degree accuracy
@@ -225,19 +209,11 @@ NTP has not completed, `lcd time` returns `ERR time unavailable`.
 sleep
 ```
 
-Enters light sleep and wakes on GPIO7 touch, UART0 activity, or QMI8658 motion
-via INT1/GPIO46. The LCD backlight is disabled during sleep and restored after
-wake. The IMU uses its low-power accelerometer for motion detection, with
-`GYRO_WAKE_THRESHOLD_MG` (default 20 mg) sensitivity and an initial eight-sample
-blanking period. This detects acceleration changes, not a five-degree angle;
-very slow rotation, especially around gravity, may not trigger it.
-
-Normal gyro sensing resumes after wake. Motion wakes retain the RAM bias;
-touch/UART wakes recalibrate and save only significant bias changes. A motion
-flag coincident with another wake also suppresses calibration. Sleep time is
-excluded from angle integration; movement during sleep is not reconstructed.
-If motion wake cannot be configured, sleep is cancelled. Hardware sensitivity
-and interrupt behavior must be verified on the actual board.
+Enters light sleep and waits for multiple IMU taps or UART0 activity. INT1 on
+GPIO46 provides the first motion interrupt. The LCD and Wi-Fi remain off while
+software checks for additional taps. IMU wakes retain gyro bias; UART wakes
+recalibrate and save only significant changes. Sleep time is excluded from
+angle integration. If the IMU cannot be configured, sleep is cancelled.
 
 Wi-Fi disconnects and the radio turns off before sleep. If Wi-Fi was enabled,
 the device reconnects to the same network asynchronously after waking, which
@@ -281,7 +257,7 @@ Close the serial monitor before uploading so it does not hold the serial port op
 Devices using the old 4 MB layout need one USB upload with this configuration
 to install the new partition table and bootloader settings. Application-only
 OTA cannot migrate the partition layout. Do not select a full-chip erase:
-NVS remains at offset `0x9000`, size `0x5000`, preserving Wi-Fi and touch
+NVS remains at offset `0x9000`, size `0x5000`, preserving existing
 Preferences during a normal upload. A bare FQBN override without these flash
 options reverts to the Arduino core defaults.
 
@@ -335,7 +311,7 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 - `ESP32_S3/http_client.cpp`: HTTPS GitHub version check and OTA download
 - `ESP32_S3/firmware_version.cpp`: strict integer version parser
 - `ESP32_S3/comms.cpp`: UART buffering and command dispatch
-- `ESP32_S3/LCD.cpp`: display, backlight, text, and status rendering
+- `ESP32_S3/lcd.cpp`: display, backlight, text, and status rendering
 - `ESP32_S3/faces.cpp`: geometric face renderer
 - `ESP32_S3/gyro.cpp`: QMI8658 driver, calibration, rates, and angle integration
 - `ESP32_S3/clock.cpp`: Belgrade timezone and NTP synchronization
@@ -358,12 +334,42 @@ in `ESP32_S3/`, not the generated `.cache/sketch/` copies.
 
 ### Motion wake sensitivity
 
-`gyro threshold` reports the current motion wake threshold in mg.
-`gyro threshold 3` sets it to `GYRO_WAKE_THRESHOLD_MG + 3` (23 mg with the
-current 20 mg base). The accepted adjustment is an integer from 0 through 100; it is
-always relative to config, not the previous setting. Higher values require
-more movement to wake.
+`gyro threshold` reports the threshold and multiplier. `gyro threshold 3`
+sets `GYRO_WAKE_THRESHOLD_MG * 3` (60 mg with the 20 mg base). Multipliers
+0–12 are accepted; products above the sensor maximum of 255 mg are rejected.
+Zero disables tap sleep/wake, leaving UART wake available. Higher values
+require stronger impulses. At the current base, 12 gives 240 mg.
 
-The resulting threshold is saved under `miniBotGyro` / `wake_mg` in Preferences,
-loaded on restart, and applied when entering the next sleep. Repeating the
-same value avoids another flash write. Touch sensitivity is unchanged.
+The multiplier is saved under `miniBotGyro` / `tap_mult` and restored at boot.
+Repeating a saved value avoids another flash write. Previous additive
+`wake_mg` settings are ignored because their meaning differs; the initial
+multiplier is 1. Removed touch calibration data is no longer used.
+
+### Invalid OTA target protection
+
+After a successful download, OTA saves its advertised target version in
+Preferences (`miniBotOTA` / `target`) before restarting. If the next boot still
+runs an older version, that target is marked invalid and will not be downloaded
+again, including after power cycles or Wi-Fi reconnections. The status LCD
+shows `max fw V<n> - invalid` below the installed firmware version. Successful
+installation of the target or a newer version clears the saved target.
+
+To recover, publish a correctly built firmware under a **higher version** or
+install it over USB; replacing a binary under the same invalid version will
+not retry it. Devices need this protection installed before it can detect a
+failed target. A failure to save the target cancels the planned restart and
+attempts to restore the running firmware as the boot partition.
+
+Display background and text colors are configured centrally as RGB565 values
+in `ESP32_S3/lcd.h`: `LCD_BACKGROUND_COLOR` and `LCD_TEXT_COLOR`.
+
+### Saved LCD colors
+
+Use `lcd color bg 0000` for a black background and `lcd color fg ffff` for
+white text. Values are exactly four hexadecimal RGB565 digits, case-insensitive
+(no `0x` prefix). Examples: `f800` red, `07e0` green, `001f` blue.
+Colors apply immediately to status, text, and clock screens and are also used
+by OTA screens. They are stored independently in Preferences namespace
+`miniBotLCD`, keys `bg` and `fg`, and loaded at startup. The defaults in
+`lcd.h` apply when no saved value exists. Repeating a saved color avoids a
+flash write. Face artwork and the cyan progress fill retain their own colors.

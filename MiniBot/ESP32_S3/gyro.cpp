@@ -8,6 +8,7 @@
 #include <esp_sleep.h>
 #include "config.h"
 #include "gyro.h"
+#include "tap_sequence.h"
 
 #define GYRO_SDA_PIN 47
 #define GYRO_SCL_PIN 48
@@ -32,33 +33,50 @@ static bool motionArmed = false;
 static bool savedBiasValid = false;
 static float savedBias[3] = {};
 
-static_assert(GYRO_WAKE_THRESHOLD_MG > 0 && GYRO_WAKE_THRESHOLD_MG <= 155,
-              "Motion threshold base must leave room for a 0-100 mg adjustment");
+static_assert(GYRO_WAKE_THRESHOLD_MG > 0 && GYRO_WAKE_THRESHOLD_MG <= 255,
+              "Motion threshold base must be 1-255 mg");
+static uint8_t thresholdMultiplier = 1;
 static uint8_t wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG;
+static TapSequence taps;
+static bool accelReady = false, pulse = false, pulseValid = false;
+static float accelAverage[3] = {};
+static uint32_t lastTapSample = 0, pulseStart = 0, quietSince = 0;
+static bool quiet = false;
+
+static void resetTaps() {
+  taps.reset();
+  accelReady = pulse = pulseValid = quiet = false;
+  lastTapSample = millis();
+}
 
 static void loadWakeThreshold() {
-  wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG;
+  thresholdMultiplier = 1;
   Preferences prefs;
-  if (!prefs.begin("miniBotGyro", true)) return;
-  uint8_t saved = prefs.getUChar("wake_mg", GYRO_WAKE_THRESHOLD_MG);
-  prefs.end();
-  if (saved != 0) wakeThresholdMg = saved;
+  if (prefs.begin("miniBotGyro", true)) {
+    uint8_t saved = prefs.getUChar("tap_mult", 1);
+    prefs.end();
+    if (saved <= 12 && (unsigned)GYRO_WAKE_THRESHOLD_MG * saved <= 255)
+      thresholdMultiplier = saved;
+  }
+  wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG * thresholdMultiplier;
 }
 
-uint8_t GYRO_GetWakeThreshold() {
-  return wakeThresholdMg;
-}
+uint8_t GYRO_GetWakeThreshold() { return wakeThresholdMg; }
+uint8_t GYRO_GetThresholdMultiplier() { return thresholdMultiplier; }
 
-bool GYRO_SetWakeThreshold(uint8_t increment) {
-  if (increment > 100) return false;
-  uint8_t value = GYRO_WAKE_THRESHOLD_MG + increment;
+bool GYRO_SetWakeThreshold(uint8_t multiplier) {
+  unsigned value = (unsigned)GYRO_WAKE_THRESHOLD_MG * multiplier;
+  if (multiplier > 12 || value > 255) return false;
   Preferences prefs;
   if (!prefs.begin("miniBotGyro", false)) return false;
-  // Compare with NVS, so the first explicit setting is saved, even at default.
-  bool ok = prefs.getUChar("wake_mg", 0) == value ||
-            prefs.putUChar("wake_mg", value) == sizeof(value);
+  bool ok = prefs.getUChar("tap_mult", 255) == multiplier ||
+            prefs.putUChar("tap_mult", multiplier) == sizeof(multiplier);
   prefs.end();
-  if (ok) wakeThresholdMg = value;
+  if (ok) {
+    thresholdMultiplier = multiplier;
+    wakeThresholdMg = value;
+    resetTaps();
+  }
   return ok;
 }
 
@@ -148,6 +166,11 @@ bool GYRO_PrepareForSleep() {
   motionArmed = true; // Also enables recovery after a partially completed setup.
   pinMode(GYRO_MOTION_WAKE_GPIO, INPUT);
   uint8_t status;
+  if (!wakeThresholdMg) {
+    gpio_wakeup_disable((gpio_num_t)GYRO_MOTION_WAKE_GPIO);
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
+    return true; // UART-only sleep; zero must not become a noisy tap threshold.
+  }
   return writeRegister(deviceAddress, GYRO_REG_CTRL7, 0) &&
          writeRegister(deviceAddress, GYRO_REG_CTRL1, 0x48) &&
          writeRegister(deviceAddress, 0x09, 0x80) &&
@@ -177,6 +200,7 @@ bool GYRO_RestoreAfterSleep(bool recalibrate) {
   }
   delay(100); // Gyro startup settling after disabling it for WoM.
   lastUpdateMs = millis(); // Never integrate elapsed sleep time.
+  resetTaps();
   if (recalibrate && statusRead && !moved) {
     float values[3];
     return GYRO_Calibrate(values);
@@ -229,6 +253,77 @@ void GYRO_Init() {
 
   detected = false;
   Serial.println("GYRO: QMI8658 not detected at 0x6A or 0x6B");
+}
+
+uint8_t GYRO_PollTaps() {
+  if (!detected || !wakeThresholdMg) return 0;
+  uint32_t now = millis();
+  if (now - lastTapSample < 5) return 0;
+  if (now - lastTapSample > 100) resetTaps();
+  lastTapSample = now;
+  float values[3];
+  for (int axis = 0; axis < 3; ++axis) {
+    uint8_t lo, hi;
+    if (!readRegister(deviceAddress, 0x35 + axis * 2, &lo) ||
+        !readRegister(deviceAddress, 0x36 + axis * 2, &hi)) {
+      resetTaps();
+      return 0;
+    }
+    values[axis] = (int16_t)((uint16_t)hi << 8 | lo) * (1000.0f / 16384.0f);
+  }
+  if (!accelReady) {
+    memcpy(accelAverage, values, sizeof(values));
+    accelReady = true;
+    return 0;
+  }
+  float energy = 0;
+  for (int axis = 0; axis < 3; ++axis) {
+    float delta = values[axis] - accelAverage[axis];
+    energy += delta * delta;
+    accelAverage[axis] += delta * 0.1f;
+  }
+  float threshold = wakeThresholdMg;
+  if (energy >= threshold * threshold) {
+    if (!pulse) {
+      pulse = true;
+      pulseStart = now;
+      pulseValid = quiet && now - quietSince >= 60;
+    }
+    quiet = false;
+  } else if (energy < threshold * threshold / 4) {
+    if (pulse) {
+      if (pulseValid && now - pulseStart <= 100) taps.tap(pulseStart);
+      pulse = pulseValid = false;
+    }
+    if (!quiet) { quiet = true; quietSince = now; }
+  }
+  // Do not report a finished sequence in the middle of another impulse.
+  return pulse ? 0 : taps.finish(now);
+}
+
+bool GYRO_ConfirmTapWake() {
+  // WoM captured the first impulse while the CPU slept. Sensor restoration
+  // takes about 100 ms; only subsequent separated impulses count as more taps.
+  resetTaps();
+  GYRO_PollTaps();
+  // Establish an accelerometer reference before opening the sequence window.
+  delay(5);
+  GYRO_PollTaps();
+  quiet = true;
+  quietSince = millis() - 60;
+  taps.tap(millis());
+  uint32_t start = millis();
+  while (millis() - start < 2000) {
+    uint8_t count = GYRO_PollTaps();
+    if (count) {
+      Serial.printf("GYRO: %u tap(s) while sleeping\n", count);
+      resetTaps();
+      return count >= 2;
+    }
+    delay(5);
+  }
+  resetTaps();
+  return false;
 }
 
 void GYRO_Update() {

@@ -1,7 +1,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 #include "faces.h"
-#include "LCD.h"
+#include "lcd.h"
 
 static const int16_t FACE_CX = 120;
 static const int16_t FACE_EYE_Y = 104;

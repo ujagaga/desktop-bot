@@ -1,13 +1,21 @@
 #ifndef LCD_H
 #define LCD_H
 
+#include <stdint.h>
+
 #define LCD_DEFAULT_ROTATION 1
+
+// Default RGB565 colors for status, text, clock, and OTA screens.
+#define LCD_BACKGROUND_COLOR 0x0000  // Black
+#define LCD_TEXT_COLOR       0xFFFF  // White
 
 // Initializes the SPI bus and the ST7789 display.
 void LCD_Init();
+// Persist an RGB565 color; return false without changing colors on save failure.
+bool LCD_SetColor(bool background, uint16_t color);
 
 // Draws a text-only battery/Wi‑Fi status summary on the display.
-void LCD_DrawBattery(float voltage, int percent, const char *timeLabel,
+void LCD_DrawStatus(float voltage, int percent, const char *timeLabel,
 					 const char *wifiLabel, const char *ipLabel);
 
 // Shows text at size 2, wrapping to the next line as needed.

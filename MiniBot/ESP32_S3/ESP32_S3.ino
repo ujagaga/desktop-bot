@@ -2,14 +2,14 @@
 // Board: https://spotpear.com/wiki/ESP32-S3-1.3-inch-LCD-ST7789-240x240-Display-Screen.html
 
 #include "battery.h"
-#include "LCD.h"
+#include "lcd.h"
 #include "comms.h"
 #include "motor.h"
 #include "wifi_connection.h"
 #include "clock.h"
 #include "http_client.h"
 #include "http_server.h"
-#include "touch_button.h"
+#include "gyro.h"
 
 
 void setup() {
@@ -19,7 +19,6 @@ void setup() {
   WIFI_Init();
   MOTOR_Init();
   HTTP_SERVER_Init();
-  TOUCH_Init();
 }
 
 void loop() {
@@ -27,7 +26,9 @@ void loop() {
   CLOCK_Process();
   BATT_process();
   MOTOR_Process();
-  TOUCH_Process();
+  uint8_t taps = GYRO_PollTaps();
+  if (taps) Serial.printf("GYRO: %u tap(s)\n", taps);
+  if (taps == 3) COMMS_Execute("sleep", Serial);
   HTTP_SERVER_Process();
   HTTP_CLIENT_Process();
 }

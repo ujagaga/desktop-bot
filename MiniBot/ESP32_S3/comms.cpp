@@ -10,11 +10,12 @@
 #include "battery.h"
 #include "wifi_connection.h"
 #include "clock.h"
-#include "LCD.h"
+#include "lcd.h"
 #include "motor.h"
 #include "gyro.h"
+#include "config.h"
 #include "faces.h"
-#include "touch_button.h"
+
 
 #define COMMS_BAUD 115200
 #define GPIO_UART_RX 13
@@ -78,28 +79,36 @@ static bool cmdBattery(Print *output, const char *args) {
 static bool cmdSleep(Print *output, const char *args) {
   (void)output;
   (void)args;
-  if (!TOUCH_PrepareForSleep()) {
-    output->println("ERR touch wake unavailable or pad held; release pad before sleep");
-    return false;
-  }
   MOTOR_StopAll();
   if (!GYRO_PrepareForSleep()) {
     GYRO_RestoreAfterSleep(false);
     output->println("ERR cannot configure motion wake; sleep cancelled");
     return false;
   }
-  Serial.println("Sleeping until motion, touch or UART activity...");
+  Serial.println("Sleeping until multiple taps or UART activity...");
   Serial.flush();
 
   LCD_BacklightOff();
   WIFI_PrepareForSleep();
   uart_set_wakeup_threshold(UART_NUM_0, 3);
   esp_sleep_enable_uart_wakeup(UART_NUM_0);
-  esp_err_t sleepResult = esp_light_sleep_start();
-  TOUCH_AfterWake();
+  esp_err_t sleepResult;
+  bool gyroRestored;
+  for (;;) {
+    sleepResult = esp_light_sleep_start();
+    bool motionWake = sleepResult == ESP_OK &&
+                      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
+    gyroRestored = GYRO_RestoreAfterSleep(sleepResult == ESP_OK && !motionWake);
+    if (!gyroRestored || !motionWake || GYRO_ConfirmTapWake()) break;
+    // An isolated tap is not a user-visible wake: leave LCD/Wi-Fi off.
+    if (!GYRO_PrepareForSleep()) {
+      GYRO_RestoreAfterSleep(false);
+      gyroRestored = false;
+      break;
+    }
+  }
   LCD_BacklightRestore();
   CLOCK_ResetSync();
-  bool gyroRestored = GYRO_RestoreAfterSleep(sleepResult == ESP_OK);
   WIFI_RestoreAfterSleep();
   if (!gyroRestored) {
     output->println("ERR gyro restore/calibration failed after sleep");
@@ -276,12 +285,16 @@ static bool cmdGyroThreshold(Print *output, const char *args) {
     unsigned int increment = 0;
     while (*end >= '0' && *end <= '9') {
       increment = increment * 10 + (*end++ - '0');
-      if (increment > 100) break; // Bound accumulation before it can overflow.
+      if (increment > 12) break; // Bound accumulation before it can overflow.
     }
     bool hasDigits = end != args;
     while (isspace((unsigned char)*end)) ++end;
-    if (!hasDigits || increment > 100 || *end) {
-      output->println("ERR gyro threshold [0-100]");
+    if (!hasDigits || increment > 10 || *end) {
+      output->println("ERR gyro threshold [0-10]");
+      return false;
+    }
+    if ((unsigned)GYRO_WAKE_THRESHOLD_MG * increment > 255) {
+      output->println("ERR threshold exceeds sensor maximum 255 mg");
       return false;
     }
     if (!GYRO_SetWakeThreshold(increment)) {
@@ -289,7 +302,8 @@ static bool cmdGyroThreshold(Print *output, const char *args) {
       return false;
     }
   }
-  output->printf("GYRO THRESHOLD %u mg\n", (unsigned)GYRO_GetWakeThreshold());
+  output->printf("GYRO THRESHOLD %u mg (multiplier %u)\n",
+                 (unsigned)GYRO_GetWakeThreshold(), (unsigned)GYRO_GetThresholdMultiplier());
   return true;
 }
 
@@ -352,16 +366,6 @@ static bool cmdLCDTime(Print *output) {
   return true;
 }
 
-static bool cmdTouch(Print *output, const char *args) {
-  char subcmd[16], extra[2];
-  if (sscanf(args, "%15s %1s", subcmd, extra) == 1) {
-    if (strcasecmp(subcmd, "calibrate") == 0) return TOUCH_Calibrate(*output);
-    if (strcasecmp(subcmd, "measure") == 0) return TOUCH_Measure(*output);
-  }
-  output->println("ERR touch <calibrate|measure>");
-  return false;
-}
-
 static bool cmdHelp(Print *output, const char *args) {
   (void)args;
   output->println("Commands:");
@@ -370,10 +374,11 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt v");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
-  output->println("  gyro threshold [0-100]");
+  output->println("  gyro threshold [0-12]");
   output->println("  gyro rate <x|y|z|0|1|2>");
   output->println("  lcd bl <0-100>");
   output->println("  lcd clear");
+  output->println("  lcd color <bg|fg> <4 hex digits>");
   output->println("  lcd face <0-15>");
   output->println("  lcd rotate <0|1|2|3>");
   output->println("  lcd status");
@@ -383,8 +388,6 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  motor rotate <pwm> <angle>");
   output->println("  sleep");
   output->println("  time");
-  output->println("  touch calibrate");
-  output->println("  touch measure");
   output->println("  wifi clear");
   output->println("  wifi ip");
   output->println("  wifi off");
@@ -398,17 +401,42 @@ static bool cmdLCDClear(Print *output, const char *args) {
   return true;
 }
 
+static bool cmdLCDColor(Print *output, const char *args) {
+  char target[3], hex[5], extra[2];
+  if (sscanf(args, "%2s %4s %1s", target, hex, extra) != 2 || strlen(hex) != 4 ||
+      (strcasecmp(target, "bg") != 0 && strcasecmp(target, "fg") != 0)) {
+    output->println("ERR lcd color <bg|fg> <4 hex digits>");
+    return false;
+  }
+  uint16_t color = 0;
+  for (int i = 0; i < 4; ++i) {
+    unsigned char c = (unsigned char)tolower((unsigned char)hex[i]);
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+      output->println("ERR lcd color <bg|fg> <4 hex digits>");
+      return false;
+    }
+    color = (color << 4) | (c <= '9' ? c - '0' : c - 'a' + 10);
+  }
+  if (!LCD_SetColor(strcasecmp(target, "bg") == 0, color)) {
+    output->println("ERR cannot save LCD color; unchanged");
+    return false;
+  }
+  if (!LCD_IsTextMode()) BATT_ShowStatus();
+  return true;
+}
+
 static bool cmdLCD(Print *output, const char *args) {
   char subcmd[16];
   const char *subargs = args;
   if (sscanf(args, "%15s", subcmd) != 1) {
-    output->println("ERR lcd <bl|clear|face|rotate|status|text|time>");
+    output->println("ERR lcd <bl|clear|color|face|rotate|status|text|time>");
     return false;
   }
 
   while (*subargs && !isspace(*subargs)) subargs++;
   while (isspace(*subargs)) subargs++;
 
+  if (strcasecmp(subcmd, "color") == 0) return cmdLCDColor(output, subargs);
   if (strcasecmp(subcmd, "bl") == 0) return cmdBacklight(output, subargs);
   if (strcasecmp(subcmd, "rotate") == 0) return cmdLCDRotate(output, subargs);
   if (strcasecmp(subcmd, "clear") == 0) return cmdLCDClear(output, subargs);
@@ -433,7 +461,7 @@ static bool cmdLCD(Print *output, const char *args) {
     return true;
   }
 
-  output->println("ERR lcd <bl|clear|face|rotate|status|text|time>");
+  output->println("ERR lcd <bl|clear|color|face|rotate|status|text|time>");
   return false;
 }
 
@@ -494,7 +522,6 @@ static const CommandEntry commandMap[] = {
   { "motor", cmdMotor },
   { "sleep", cmdSleep },
   { "time", cmdTime },
-  { "touch", cmdTouch },
   { "wifi", cmdWifi },
 };
 
