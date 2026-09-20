@@ -2,6 +2,15 @@
 
 MiniBot is an ESP32-S3 robot controller with a 240x240 ST7789 LCD, QMI8658 IMU, two PWM motor channels, Wi-Fi, battery monitoring, and line-based UART commands.
 
+## ESP32-CAM companion
+
+The classic AI-Thinker camera module is a separate firmware project in
+[`ESP32_CAM`](ESP32_CAM/README.md). It provides camera preview/settings, browser
+logs, a Wi-Fi setup AP, Preferences storage and startup GitHub OTA checks.
+Build it with `tools/build_cam.sh`; its pin map, version and OTA binary are
+independent of the ESP32-S3 controller. See its README for first-time flashing,
+Wi-Fi access and the HTTP API.
+
 ## Hardware
 
 - Board: ESP32-S3
@@ -30,7 +39,9 @@ MiniBot is an ESP32-S3 robot controller with a 240x240 ST7789 LCD, QMI8658 IMU, 
 | LCD RST | 42 |
 | LCD backlight | 20 |
 
-The command interface is available through USB `Serial` and the GPIO UART `Serial2` at `115200` baud. Commands are ASCII lines terminated by a newline and are case-insensitive.
+The command interface is available through USB `Serial` and the GPIO UART `Serial2` at `115200` baud. Commands are ASCII lines terminated by a newline and are case-insensitive. Keep
+commands to 127 bytes, excluding the newline. Successful commands end with `OK`;
+failures return `ERR ...`. Responses go to the originating console.
 
 ## Tap sleep and wake
 
@@ -38,11 +49,18 @@ GPIO7 capacitive touch support and its commands have been removed. The IMU
 now groups acceleration impulses into single, double, triple, or longer tap
 sequences. Allow 120–500 ms between taps, and then pause for over 500 ms:
 
-- Awake: exactly three taps enter sleep; single/double taps do nothing.
+- Awake: a sequence at or above the saved sleep count enters sleep (default 3).
 - Sleeping: a first motion event briefly wakes the CPU with LCD/Wi-Fi off.
-  Two or more taps complete the wake; a lone tap returns to sleep.
+  A sequence at or above the saved wake count completes the wake (default 1);
+  fewer taps return the CPU to sleep.
 - UART wake remains available. A wake sequence is consumed, so three taps
   while sleeping do not immediately send the robot back to sleep.
+
+Set the counts independently with `gyro tap sleep <1-3>` and
+`gyro tap wake <1-3>`. Both comparisons are inclusive: setting 2 means two or
+more taps. Omit the number to read the current setting. Both counts survive
+restarts in Preferences; repeating an unchanged saved setting avoids a flash write.
+A sequence is evaluated after the quiet interval, not immediately on the nth tap.
 
 The first sleeping impulse is detected by hardware WoM; subsequent impulses
 are checked in software. Short pulses must return to quiet within 100 ms.
@@ -67,12 +85,18 @@ batt v
 
 - `batt c` returns the battery percentage as an integer.
 - `batt v` returns the measured battery voltage in volts.
+- `bat` is also accepted as an alias for `batt`.
+
+Voltage averages eight ADC readings with the onboard 2:1 divider correction.
+Percentage is a linear, clamped estimate from 3.3 V (0%) to 4.2 V (100%).
 
 ### LCD
 
 ```text
 lcd bl <0-100>
 lcd clear
+lcd color bg <4 hex digits>
+lcd color fg <4 hex digits>
 lcd face <0-15>
 lcd rotate <0-3>
 lcd status
@@ -81,7 +105,10 @@ lcd time
 time
 ```
 
-- `lcd bl` sets the backlight percentage.
+- `lcd bl` sets the backlight percentage. It is restored after light sleep but is
+  not saved across a reboot.
+- `lcd color bg` and `lcd color fg` set and save RGB565 background/text colors;
+  see [Saved LCD colors](#saved-lcd-colors).
 - `lcd clear` clears the screen and returns to normal status updates.
 - `lcd rotate` selects display rotation `0` through `3`.
 - `lcd status` shows battery percentage, voltage, current time, Wi-Fi SSID, IP address, and firmware version.
@@ -112,14 +139,14 @@ tools/build_s3.sh
 `--size` is the maximum dimension in pixels (16–240), preserving aspect ratio.
 Use `--face-size 00=96` to override one face independently; repeat this option
 for other faces. Running without arguments restores the default 240-pixel size.
-The importer writes `ESP32_S3/face_assets.h` and the individual PNG previews.
+The importer writes `ESP32_S3/face_assets.h`; PNG previews are optional.
 Changes take effect after rebuilding and installing the firmware. The importer reads the individual PNGs, never the original sheet, and leaves them
 unchanged. It preserves aspect ratio, only shrinks oversized images, and composites
 transparent pixels onto black. Use `--input-dir /path/to/faces` for a different
 source directory. No preview folder is created by default. To optionally generate
 rendered previews, pass `--previews /tmp/face-previews`.
 
-Face IDs:
+Default artwork by face ID (replacement artwork may differ):
 
 | ID | Expression |
 | ---: | --- |
@@ -154,11 +181,18 @@ lcd status
 gyro angle <x|y|z|0|1|2>
 gyro rate <x|y|z|0|1|2>
 gyro calibrate
+gyro threshold [0-10]
+gyro tap wake [1-3]
+gyro tap sleep [1-3]
 ```
 
 - `gyro rate` reports angular velocity in degrees per second (`dps`).
 - `gyro angle` reports integrated relative rotation in degrees from the last calibration or startup.
 - `gyro calibrate` averages the stationary gyro bias for about one second and resets the integrated angles.
+- `gyro threshold` reads or saves the acceleration sensitivity multiplier; see
+  [Motion wake sensitivity](#motion-wake-sensitivity).
+- `gyro tap wake` and `gyro tap sleep` read or save independent minimum tap
+  counts. Values 1–3 mean that many taps or more, not strictly more.
 
 Gyro bias is loaded from Preferences namespace `miniBotGyro`, key `bias_v1`,
 at startup. If no valid saved bias exists, startup calibrates once. The
@@ -198,6 +232,12 @@ commands. `http_server.cpp` uses `COMMS_Execute()` from `comms.h`, so the web
 console and both serial ports share all command handlers and `OK`/`ERR` replies.
 The page displays command replies; background serial logs are not streamed.
 
+The browser saves the last 10 submitted commands in localStorage. Arrow Up
+recalls the newest command, then progressively older commands; Arrow Down moves
+toward newer ones and restores the unfinished input after the newest entry.
+History survives page reloads for that browser/site address. If browser storage
+is unavailable, history still works for the current page session.
+
 Commands can also be sent directly with GET:
 
 ```sh
@@ -227,6 +267,9 @@ wifi ip
 
 `wifi on` connects to the network and stores the credentials. SSID and password are whitespace-delimited, so they currently cannot contain spaces.
 `wifi ip` returns the current IP address, or `0.0.0.0` when disconnected.
+`wifi off` disconnects without deleting credentials; a reboot can reconnect using
+them. `wifi clear` disconnects and deletes the saved SSID/password. Startup
+connects asynchronously using saved credentials; `wifi on` waits up to 15 seconds.
 
 When Wi-Fi is connected, the firmware synchronizes time from NTP using the
 Belgrade timezone, including Central European daylight-saving time rules. If
@@ -238,9 +281,11 @@ NTP has not completed, `lcd time` returns `ERR time unavailable`.
 sleep
 ```
 
-Enters light sleep and waits for multiple IMU taps or UART0 activity. INT1 on
+Stops both motors, enters light sleep, and waits for the configured IMU tap
+count or UART0 activity. UART0 wake is distinct from the `Serial2` command port;
+GPIO13/14 are not configured as the sleep wake source. INT1 on
 GPIO46 provides the first motion interrupt. The LCD and Wi-Fi remain off while
-software checks for additional taps. IMU wakes retain gyro bias; UART wakes
+software confirms the configured tap count. IMU wakes retain gyro bias; UART wakes
 recalibrate and save only significant changes. Sleep time is excluded from
 angle integration. If the IMU cannot be configured, sleep is cancelled.
 
@@ -256,9 +301,44 @@ off. Sleep does not erase saved credentials.
 - `lcd status` returns the display to the live battery and Wi-Fi status screen.
 - The LCD, gyro, and face renderer are separated into dedicated modules.
 
+### LCD row layout
+
+`ESP32_S3/lcd.h` centralizes `LCD_DEFAULT_TEXT_SIZE` (2), `LCD_ROW_TOP` (20),
+`LCD_ROW_LEFT` (10), and `LCD_ROW_GAP` (12). The default row pitch is 28 pixels:
+`8 * textSize + LCD_ROW_GAP`. `LCD_SetRow(row, textSize)` positions a zero-based
+row; `LCD_ClearRow(row, textSize)` clears its full width using the current
+background. The size argument is optional and defaults to `LCD_DEFAULT_TEXT_SIZE`.
+Use the same size for both helpers; invalid sizes or off-screen rows return false.
+
+Status rows are fixed: battery, time, firmware version, reserved invalid-target
+message, Wi-Fi SSID, and IP address. Only changed rows are cleared and redrawn,
+reducing flicker. Long status strings are clipped rather than wrapped into the
+next row. The optional invalid-target row stays reserved even when empty.
+
+### Persistent settings
+
+Preferences manages NVS storage by namespace and key; no manual address
+allocation is needed between these modules.
+
+| Namespace | Keys | Saved data |
+| --- | --- | --- |
+| `miniBotWiFi` | `ssid`, `pass` | Wi-Fi credentials |
+| `miniBotGyro` | `bias_v1` | Three gyro bias values |
+| `miniBotGyro` | `tap_mult` | Acceleration threshold multiplier |
+| `miniBotGyro` | `wake_taps`, `sleep_taps` | Minimum wake/sleep tap counts |
+| `miniBotLCD` | `bg`, `fg` | LCD RGB565 colors |
+| `miniBotOTA` | `target` | Advertised OTA target for restart validation |
+
+These settings survive normal restarts and application OTA updates. `wifi clear`
+only clears Wi-Fi credentials. Browser command history lives in the browser,
+not in device Preferences.
+
 ## Build and upload
 
-Install `arduino-cli` and the ESP32 Arduino core first. The project uses the `esp32:esp32:esp32s3` board target with
+Install `arduino-cli`, the ESP32 Arduino core, and the Arduino libraries
+`Adafruit GFX Library`, `Adafruit ST7735 and ST7789 Library`, and `ArduinoJson`
+(with their dependencies). Python 3 is needed for IntelliSense generation; Pillow
+is needed only when regenerating face assets. The project uses the `esp32:esp32:esp32s3` board target with
 `FlashSize=16M,PartitionScheme=app3M_fat9M_16MB`: two 3 MiB OTA firmware
 slots and approximately 10 MiB of FAT filesystem space on the 16 MB flash.
 The build script and VS Code Arduino settings select this layout by default.
@@ -294,7 +374,7 @@ options reverts to the Arduino core defaults.
 
 Set `FIRMWARE_VERSION` in `ESP32_S3/config.h` before building a release. The
 version is a positive integer, starting at `1`, and the LCD status screen displays
-it as `FW 1`. Increase it for each release (`2`, `3`, etc.).
+it as `Firmware V1`. Increase it for each release (`2`, `3`, etc.).
 
 After running `tools/build_s3.sh`, commit the source changes together with
 `ESP32_S3/build/ESP32_S3.ino.bin`. This application binary is the only build
@@ -336,18 +416,25 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 ## Project structure
 
 - `ESP32_S3/ESP32_S3.ino`: firmware setup and main loop
-- `ESP32_S3/config.h`: firmware version
+- `ESP32_S3/config.h`: firmware version, OTA repository, and IMU wake/bias settings
+- `ESP32_S3/http_server.cpp`: browser console, command history, and GET commands
 - `ESP32_S3/http_client.cpp`: HTTPS GitHub version check and OTA download
 - `ESP32_S3/firmware_version.cpp`: strict integer version parser
 - `ESP32_S3/comms.cpp`: UART buffering and command dispatch
 - `ESP32_S3/lcd.cpp`: display, backlight, text, and status rendering
 - `ESP32_S3/faces.cpp`: native-resolution bitmap face renderer
+- `ESP32_S3/face_assets.h`: generated numeric face palettes, RLE data, and dimensions
+- `ESP32_S3/face_bitmap.h`: bitmap descriptor format
+- `ESP32_S3/tap_sequence.h`: tap grouping and quiet-interval detection
 - `ESP32_S3/gyro.cpp`: QMI8658 driver, calibration, rates, and angle integration
 - `ESP32_S3/clock.cpp`: Belgrade timezone and NTP synchronization
 - `ESP32_S3/battery.cpp`: battery measurement and status refresh
 - `ESP32_S3/motor.cpp`: timed motor control
 - `ESP32_S3/wifi_connection.cpp`: stored Wi-Fi credentials and connection management
 - `tools/build_s3.sh`: build and upload script
+- `tools/import_faces.py`: convert numbered PNGs to firmware face assets
+- `tools/faces/`: replaceable source PNGs and face-specific instructions
+- `tools/update_intellisense.py`: generate VS Code configuration from the build
 
 ### VS Code IntelliSense
 
@@ -364,10 +451,13 @@ in `ESP32_S3/`, not the generated `.cache/sketch/` copies.
 ### Motion wake sensitivity
 
 `gyro threshold` reports the threshold and multiplier. `gyro threshold 3`
-sets `GYRO_WAKE_THRESHOLD_MG * 3` (60 mg with the 20 mg base). Multipliers
-0–12 are accepted; products above the sensor maximum of 255 mg are rejected.
+sets `GYRO_WAKE_THRESHOLD_MG * 3` (75 mg with the current 25 mg base).
+The command parser currently accepts 0–10. The underlying setter permits 0–12,
+but rejects products above the sensor maximum of 255 mg; with the current base,
+10 gives 250 mg and 11–12 would exceed that maximum. The runtime `help` output
+still lists 0–12, so follow the parser's 0–10 range.
 Zero disables tap sleep/wake, leaving UART wake available. Higher values
-require stronger impulses. At the current base, 12 gives 240 mg.
+require stronger acceleration impulses; this is not a rotation-angle threshold.
 
 The multiplier is saved under `miniBotGyro` / `tap_mult` and restored at boot.
 Repeating a saved value avoids another flash write. Previous additive

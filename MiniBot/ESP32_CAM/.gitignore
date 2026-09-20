@@ -1,2 +1,3 @@
-.cache
-build
+.cache/
+build/*
+!build/ESP32_CAM.ino.bin
