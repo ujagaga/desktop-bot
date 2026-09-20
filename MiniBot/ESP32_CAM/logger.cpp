@@ -18,7 +18,7 @@ void LOG_append(const char *message) {
   head = (head + 1) % 20;
   if (count < 20) ++count;
   portEXIT_CRITICAL(&mux);
-  Serial.println(line);
+  // Keep logs in the HTTP ring buffer; Serial is the S3 command link.
 }
 void LOG_printf(const char *format, ...) {
   char message[160];

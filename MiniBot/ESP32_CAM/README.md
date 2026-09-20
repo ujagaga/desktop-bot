@@ -27,10 +27,14 @@ HTTP API or written to logs. There is no UART setup requirement after flashing.
 
 ### S3 UART link
 
-The CAM uses `Serial2` at 115200 baud (8N1), with RX GPIO14 connected to
-S3 TX GPIO13 and TX GPIO13 connected to S3 RX GPIO14, plus common ground.
+The CAM uses UART0 (`Serial`) at 115200 baud (8N1), with U0R/RX GPIO3
+connected to S3 TX GPIO13 and U0T/TX GPIO1 connected to S3 RX GPIO14, plus
+common ground. This matches the schematic.
 The CAM pins and two-second polling interval are configurable in `config.h`.
-These pins cannot also be used for an SD card.
+These are also the programming UART pins; disconnect the S3 UART wires when
+flashing through a USB-to-UART adapter. Application logs stay in the web UI,
+and runtime SDK serial logging is disabled to keep the command link clean.
+ROM boot output can still appear before the application starts.
 
 An independent FreeRTOS task starts before camera initialization and drains
 UART input even while capture/streaming or the main loop is busy. A software
@@ -62,7 +66,7 @@ in-memory logger retains the last **20 messages**, each up to 191 bytes includin
 seconds since boot. The page polls every two seconds and renders messages as
 plain text. Future handlers can call `LOG_append()` or `LOG_printf()` to report
 status. Logging is synchronized between the HTTP tasks and main loop. Logs reset
-on reboot and are also mirrored to Serial for development.
+on reboot. They are not mirrored to Serial because UART0 is the S3 command link.
 
 The camera mutex protects capture, settings and shutdown. A frame is returned
 before its lock is released. HTTP handlers are stopped and joined before OTA

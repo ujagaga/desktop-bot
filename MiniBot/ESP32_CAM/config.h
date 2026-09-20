@@ -1,8 +1,8 @@
 #pragma once
-#define FIRMWARE_VERSION 3
-// Cross-connect to S3 TX GPIO13 / RX GPIO14; share ground. No SD card.
-#define COMMS_RX_PIN 14
-#define COMMS_TX_PIN 13
+#define FIRMWARE_VERSION 4
+// Standard CAM UART0: U0R/GPIO3 to S3 TX GPIO13, U0T/GPIO1 to S3 RX GPIO14.
+#define COMMS_RX_PIN 3
+#define COMMS_TX_PIN 1
 #define COMMS_BAUD 115200
 #define COMMS_IP_POLL_MS 2000
 #define OTA_GITHUB_REPOSITORY "ujagaga/desktop-bot"

@@ -1,3 +1,4 @@
+#include <esp_log.h>
 #include "camera.h"
 #include "comms.h"
 #include "http_client.h"
@@ -6,7 +7,8 @@
 #include "wifi_connection.h"
 
 void setup() {
-  Serial.begin(115200);
+  // UART0 belongs to the S3 link; runtime SDK logs must not become commands.
+  esp_log_level_set("*", ESP_LOG_NONE);
   LOG_init();
   LOG_append("MiniBot CAM starting");
   COMMS_Init();

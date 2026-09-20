@@ -33,8 +33,8 @@ static void receiveTask(void *) {
   bool discard = false, requested = false;
   for (;;) {
     // Bound each batch so continuous input still allows the task to yield.
-    for (unsigned count = 0; count < 256 && Serial2.available(); ++count) {
-      int byte = Serial2.read();
+    for (unsigned count = 0; count < 256 && Serial.available(); ++count) {
+      int byte = Serial.read();
       if (byte < 0) break;
       if (byte == '\r' || byte == '\n') {
         if (!discard && length && requested && !COMMS_peerWifiIP.load()) {
@@ -57,7 +57,7 @@ static void receiveTask(void *) {
       // Retry a stop if the timer command queue was temporarily full.
       if (xTimerIsTimerActive(pollTimer)) xTimerStop(pollTimer, 0);
     } else if (pollDue.exchange(false)) {
-      Serial2.print("wifi ip\n");
+      Serial.print("wifi ip\n");
       requested = true;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -66,12 +66,14 @@ static void receiveTask(void *) {
 
 bool COMMS_Init() {
   if (rxTask) return true;
-  Serial2.setRxBufferSize(1024);
-  Serial2.begin(COMMS_BAUD, SERIAL_8N1, COMMS_RX_PIN, COMMS_TX_PIN);
-  if (!Serial2) {
+  Serial.setRxBufferSize(1024);
+  Serial.begin(COMMS_BAUD, SERIAL_8N1, COMMS_RX_PIN, COMMS_TX_PIN);
+  if (!Serial) {
     LOG_append("ERR command UART startup failed");
     return false;
   }
+  Serial.setDebugOutput(false);
+  Serial.print("\n"); // Terminate any partial boot output seen by the S3.
   pollDue.store(true);
   // Timer callbacks never perform serial I/O or wait for a response.
   pollTimer = xTimerCreate("s3WifiIP", pdMS_TO_TICKS(COMMS_IP_POLL_MS), pdTRUE,
@@ -79,7 +81,7 @@ bool COMMS_Init() {
   if (!pollTimer || xTimerStart(pollTimer, 0) != pdPASS) {
     if (pollTimer) xTimerDelete(pollTimer, portMAX_DELAY);
     pollTimer = nullptr;
-    Serial2.end();
+    Serial.end();
     LOG_append("ERR UART IP poll timer startup failed");
     return false;
   }
@@ -87,7 +89,7 @@ bool COMMS_Init() {
   if (xTaskCreate(receiveTask, "commsRx", 3072, nullptr, 2, &rxTask) != pdPASS) {
     xTimerDelete(pollTimer, portMAX_DELAY);
     pollTimer = nullptr;
-    Serial2.end();
+    Serial.end();
     LOG_append("ERR UART RX task startup failed");
     return false;
   }
