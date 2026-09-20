@@ -88,7 +88,36 @@ time
 - `lcd text` clears the screen and displays wrapped text. It remains visible until another LCD content command is used.
 - `lcd time` shows the synchronized local time as `HH:MM` and the weekday/date below it, for example `Saturday 19.09.`. Seconds are not displayed.
 - `time` prints the current `HH:MM` and weekday/date to the command console.
-- `lcd face` displays a geometric face and remains visible until another LCD content command is used.
+- `lcd face` displays a bitmap face and remains visible until another LCD content command is used.
+
+Face source images live in `tools/faces/`, named `00_neutral.png` through
+`15_shocked.png`. They were split from the original sheet without frames or captions.
+Only the first two filename characters determine the ID (00–15); the rest of the
+name is arbitrary. Provide exactly one PNG per ID. Missing or duplicate IDs are rejected. The default image bounds are 240×240 pixels, centered on the display without
+stretching. Each asset declares its own width and height; the renderer writes only
+that rectangle, after clearing the previous screen once. Margins use the configured
+LCD background; the artwork retains its own colors and black background.
+
+The 16 RGB565 palettes and run-length encoded images occupy 77,937 bytes (about
+76 KiB) in flash, plus a small descriptor table. No full-image RAM buffer is needed.
+Preview the individual source PNGs directly in `tools/faces/`.
+
+To regenerate smaller images, install Python Pillow if needed, then run:
+
+```sh
+python3 tools/import_faces.py --size 120
+tools/build_s3.sh
+```
+
+`--size` is the maximum dimension in pixels (16–240), preserving aspect ratio.
+Use `--face-size 00=96` to override one face independently; repeat this option
+for other faces. Running without arguments restores the default 240-pixel size.
+The importer writes `ESP32_S3/face_assets.h` and the individual PNG previews.
+Changes take effect after rebuilding and installing the firmware. The importer reads the individual PNGs, never the original sheet, and leaves them
+unchanged. It preserves aspect ratio, only shrinks oversized images, and composites
+transparent pixels onto black. Use `--input-dir /path/to/faces` for a different
+source directory. No preview folder is created by default. To optionally generate
+rendered previews, pass `--previews /tmp/face-previews`.
 
 Face IDs:
 
@@ -312,7 +341,7 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 - `ESP32_S3/firmware_version.cpp`: strict integer version parser
 - `ESP32_S3/comms.cpp`: UART buffering and command dispatch
 - `ESP32_S3/lcd.cpp`: display, backlight, text, and status rendering
-- `ESP32_S3/faces.cpp`: geometric face renderer
+- `ESP32_S3/faces.cpp`: native-resolution bitmap face renderer
 - `ESP32_S3/gyro.cpp`: QMI8658 driver, calibration, rates, and angle integration
 - `ESP32_S3/clock.cpp`: Belgrade timezone and NTP synchronization
 - `ESP32_S3/battery.cpp`: battery measurement and status refresh
