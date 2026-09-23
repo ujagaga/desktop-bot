@@ -5,6 +5,8 @@
 
 void GYRO_Init();
 void GYRO_Update();
+// Same integration as GYRO_Update(), but only the given axis (fewer I2C reads, tighter loop timing).
+void GYRO_UpdateAxis(int axis);
 uint8_t GYRO_GetWakeThreshold();
 uint8_t GYRO_GetThresholdMultiplier();
 // Wake/sleep require at least the saved tap count (1-3).

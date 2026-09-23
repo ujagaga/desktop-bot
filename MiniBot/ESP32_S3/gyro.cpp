@@ -379,6 +379,18 @@ void GYRO_Update() {
   }
 }
 
+void GYRO_UpdateAxis(int axis) {
+  if (!detected || axis < 0 || axis > 2) return;
+
+  unsigned long now = millis();
+  unsigned long elapsedMs = now - lastUpdateMs;
+  lastUpdateMs = now;
+  if (elapsedMs == 0 || elapsedMs > GYRO_MAX_INTEGRATION_INTERVAL_MS) return;
+
+  float elapsedSeconds = elapsedMs / 1000.0f;
+  angles[axis] += GYRO_GetRateDps(axis) * elapsedSeconds;
+}
+
 bool GYRO_IsDetected() {
   return detected;
 }

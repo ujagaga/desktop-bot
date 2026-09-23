@@ -272,7 +272,7 @@ static bool cmdMotorRotate(Print *output, const char *args) {
 
   bool correctingOvershoot = false;
   while (millis() - startMs < MOTOR_ROTATE_TIMEOUT_MS) {
-    GYRO_Update();
+    GYRO_UpdateAxis(axis);
     float deltaDegrees = direction * (GYRO_GetAngleDegrees(axis) - startDegrees);
 
     if (!correctingOvershoot && deltaDegrees >= targetDegrees) {
