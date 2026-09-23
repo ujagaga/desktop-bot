@@ -15,7 +15,7 @@ struct MotorPins {
 
 static const MotorPins motorPins[2] = {
   { 9, 10 },
-  { 11, 12 },
+  { 12, 11 },
 };
 
 struct MotorState {
