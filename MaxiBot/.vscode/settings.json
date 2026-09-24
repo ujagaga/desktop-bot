@@ -1,13 +1,6 @@
 {
     "quickCommandButtons.buttons": [
         {
-            "color": "#FFD700",
-            "command": "claude",
-            "insertOnly": false,
-            "name": "$(robot) Claude",
-            "useVsCodeApi": false
-        },
-        {
             "color": "#8BC34A",
             "command": "./tools/build.sh",
             "insertOnly": false,
@@ -22,10 +15,10 @@
             "useVsCodeApi": false
         },
         {
-            "color": "#8BC34A",
-            "command": "stty -F /dev/ttyUSB0 115200 raw && cat /dev/ttyUSB0",
+            "color": "#FF9800",
+            "command": "./python/.venv/bin/python ./python/stream_view.py",
             "insertOnly": false,
-            "name": "🔌 ttyUSB0@115200",
+            "name": "$(terminal) Monitor",
             "useVsCodeApi": false
         }
     ]

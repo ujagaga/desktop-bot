@@ -16,6 +16,9 @@
 #include "linux/videodev2.h"
 #include "driver/usb_serial_jtag.h"
 #include "driver/jpeg_encode.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 /* SCCB I2C wiring and CSI reset/pwdn per WT9932P4-TINY schematic V1.3. */
 #define CAM_I2C_PORT     0
@@ -23,9 +26,13 @@
 #define CAM_I2C_SDA_PIN  7
 #define CAM_RESET_PIN    -1
 #define CAM_PWDN_PIN     -1
+/* J2 pin 5 (RPi CAM_GPIO): enables the camera module's LDOs / releases reset. */
+#define CAM_ENABLE_PIN   0
 #define BUF_COUNT        2
 #define FRAME_MAGIC      0x55AA55AA
 #define JPEG_QUALITY     80
+/* Driver TX ringbuffer size; a single write larger than this always fails. */
+#define USB_TX_BUF_SIZE  256
 
 static const char *TAG = "uart_cam";
 
@@ -33,7 +40,11 @@ static void usb_write_all(const uint8_t *data, size_t len)
 {
     size_t sent = 0;
     while (sent < len) {
-        int n = usb_serial_jtag_write_bytes(data + sent, len - sent, portMAX_DELAY);
+        size_t chunk = len - sent;
+        if (chunk > USB_TX_BUF_SIZE) {
+            chunk = USB_TX_BUF_SIZE;
+        }
+        int n = usb_serial_jtag_write_bytes(data + sent, chunk, portMAX_DELAY);
         if (n > 0) {
             sent += (size_t)n;
         }
@@ -52,6 +63,14 @@ static void put_u16le(uint8_t *p, uint16_t v)
 
 void app_main(void)
 {
+    gpio_config_t cam_en_cfg = {
+        .pin_bit_mask = 1ULL << CAM_ENABLE_PIN,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_ERROR_CHECK(gpio_config(&cam_en_cfg));
+    gpio_set_level(CAM_ENABLE_PIN, 1);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     esp_video_init_csi_config_t csi_config[] = {{
         .sccb_config = {
             .init_sccb = true,
@@ -134,6 +153,7 @@ void app_main(void)
     };
 
     usb_serial_jtag_driver_config_t usb_cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    usb_cfg.tx_buffer_size = USB_TX_BUF_SIZE;
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&usb_cfg));
 
     uint8_t header[12];

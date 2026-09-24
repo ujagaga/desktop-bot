@@ -271,9 +271,15 @@ static bool cmdMotorRotate(Print *output, const char *args) {
   MOTOR_Set(2, motor2Forward, pwmPercent);
 
   bool correctingOvershoot = false;
+  unsigned long lastDebugMs = startMs;
   while (millis() - startMs < MOTOR_ROTATE_TIMEOUT_MS) {
     GYRO_UpdateAxis(axis);
     float deltaDegrees = direction * (GYRO_GetAngleDegrees(axis) - startDegrees);
+
+    if (millis() - lastDebugMs >= 100) {
+      lastDebugMs = millis();
+      Serial.printf("ROTATE dbg t=%lu delta=%.2f\n", millis() - startMs, deltaDegrees);
+    }
 
     if (!correctingOvershoot && deltaDegrees >= targetDegrees) {
       if (deltaDegrees <= targetDegrees + MOTOR_ROTATE_OVERSHOOT_DEGREES) break;

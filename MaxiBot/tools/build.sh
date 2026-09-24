@@ -4,6 +4,7 @@
 #
 #   tools/build.sh            compile only
 #   tools/build.sh flash      compile, then flash
+#   tools/build.sh monitor    compile, flash, then open serial monitor
 #
 # Overrides via env:
 #   IDF_PATH=/path/to/esp-idf   ESP-IDF checkout (default: ~/esp/esp-idf)
@@ -22,9 +23,9 @@ PORT="${PORT:-/dev/ttyACM0}"
 source "$IDF_PATH/export.sh" >/dev/null
 
 cd "$PROJECT_DIR"
-idf.py set-target esp32p4
 idf.py build
 
-if [ "${1:-}" = "flash" ]; then
-  idf.py -p "$PORT" flash
-fi
+case "${1:-}" in
+  flash)   idf.py -p "$PORT" flash ;;
+  monitor) idf.py -p "$PORT" flash monitor ;;
+esac
