@@ -13,13 +13,6 @@
             "insertOnly": false,
             "name": "🔌 Upload",
             "useVsCodeApi": false
-        },
-        {
-            "color": "#FF9800",
-            "command": "./python/.venv/bin/python ./python/stream_view.py",
-            "insertOnly": false,
-            "name": "$(terminal) Monitor",
-            "useVsCodeApi": false
         }
     ]
 }

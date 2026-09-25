@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=6.0"
+  esp_video:
+    version: "2.3.*"
+    public: true

@@ -7,12 +7,12 @@
 #   tools/build.sh monitor    compile, flash, then open serial monitor
 #
 # Overrides via env:
-#   IDF_PATH=/path/to/esp-idf   ESP-IDF checkout (default: ~/esp/esp-idf)
+#   IDF_PATH=/path/to/esp-idf   ESP-IDF checkout (default: ~/esp/esp-idf-v6)
 #   PORT=/dev/ttyACM0           serial port for flashing
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IDF_PATH="${IDF_PATH:-$HOME/esp/esp-idf}"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../ESP32P4" && pwd)"
+IDF_PATH="${IDF_PATH:-$HOME/esp/esp-idf-v6}"
 PORT="${PORT:-/dev/ttyACM0}"
 
 [ -f "$IDF_PATH/export.sh" ] || {
