@@ -2,16 +2,30 @@
     "quickCommandButtons.buttons": [
         {
             "color": "#8BC34A",
-            "command": "./tools/build.sh",
+            "command": "./tools/build_p4.sh",
             "insertOnly": false,
-            "name": "$(check-all) Build",
+            "name": "$(check-all) P4 Build",
             "useVsCodeApi": false
         },
         {
             "color": "#2196F3",
-            "command": "./tools/build.sh flash",
+            "command": "./tools/build_p4.sh flash",
             "insertOnly": false,
-            "name": "🔌 Upload",
+            "name": "🔌 P4 Upload",
+            "useVsCodeApi": false
+        },
+        {
+            "color": "#8BC34A",
+            "command": "./tools/build_wroom.sh",
+            "insertOnly": false,
+            "name": "$(check-all) WROOM Build",
+            "useVsCodeApi": false
+        },
+        {
+            "color": "#2196F3",
+            "command": "./tools/build_wroom.sh flash",
+            "insertOnly": false,
+            "name": "🔌 WROOM Upload",
             "useVsCodeApi": false
         }
     ]
