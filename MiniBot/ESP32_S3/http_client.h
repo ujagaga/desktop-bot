@@ -7,6 +7,8 @@
 void HTTP_CLIENT_Init();
 // Check GitHub after connecting, once time is synchronized for HTTPS.
 void HTTP_CLIENT_Process();
+// Queue a manual GitHub firmware check while station Wi-Fi is connected.
+bool HTTP_CLIENT_RequestCheck();
 // Failed OTA target retained across restarts; zero when none.
 uint32_t HTTP_CLIENT_GetInvalidVersion();
 

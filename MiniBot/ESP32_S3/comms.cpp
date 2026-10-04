@@ -18,6 +18,7 @@
 #include "config.h"
 #include "faces.h"
 #include "audio.h"
+#include "http_client.h"
 
 
 #define COMMS_BAUD 115200
@@ -589,6 +590,8 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("Commands:");
   output->println("  help");
   output->println("  audio test");
+  output->println("  ota check");
+  output->println("  cam ota check");
   output->println("  batt c");
   output->println("  batt v");
   output->println("  gyro angle <x|y|z|0|1|2>");
@@ -625,6 +628,32 @@ static bool cmdAudio(Print *output, const char *args) {
     return false;
   }
   return AUDIO_Test(*output);
+}
+
+static bool cmdOTA(Print *output, const char *args) {
+  char subcmd[16], extra[2];
+  if (sscanf(args, "%15s %1s", subcmd, extra) != 1 || strcasecmp(subcmd, "check") != 0) {
+    output->println("ERR ota check");
+    return false;
+  }
+  if (!HTTP_CLIENT_RequestCheck()) {
+    output->println("ERR OTA check unavailable (Wi-Fi disconnected or check already pending)");
+    return false;
+  }
+  output->println("OTA check scheduled");
+  return true;
+}
+
+static bool cmdCam(Print *output, const char *args) {
+  char subcmd[16], action[16], extra[2];
+  if (sscanf(args, "%15s %15s %1s", subcmd, action, extra) != 2 ||
+      strcasecmp(subcmd, "ota") != 0 || strcasecmp(action, "check") != 0) {
+    output->println("ERR cam ota check");
+    return false;
+  }
+  Serial2.println("ota check");
+  output->println("CAM OTA check request sent; see CAM status/logs");
+  return true;
 }
 
 static bool cmdLCDClear(Print *output, const char *args) {
@@ -748,6 +777,8 @@ struct CommandEntry {
 static const CommandEntry commandMap[] = {
   { "help", cmdHelp },
   { "audio", cmdAudio },
+  { "cam", cmdCam },
+  { "ota", cmdOTA },
   { "bat", cmdBattery },
   { "batt", cmdBattery },
   { "gyro", cmdGyro },

@@ -92,6 +92,20 @@ static bool dispatchCommand(const char *line) {
     else sleepRequested.store(true); // Main loop joins HTTP/camera work before ACK.
     return true;
   }
+  if (!strcasecmp(command, "ota")) {
+    if (fields != 2 || strcasecmp(argument, "check")) {
+      Serial.println("ERR ota check");
+      consoleAppend("\n[reply] ERR ota check\n");
+    } else if (!HTTPC_requestCheck()) {
+      Serial.println("ERR CAM OTA check unavailable or already pending");
+      consoleAppend("\n[reply] ERR CAM OTA check unavailable or already pending\n");
+    } else {
+      LOG_append("OTA: manual check requested over UART");
+      Serial.println("OK");
+      consoleAppend("\n[reply] OK CAM OTA check scheduled\n");
+    }
+    return true;
+  }
   if (!strcasecmp(command, "report")) {
     uint32_t address;
     if (fields != 3 || strcasecmp(argument, "ip") || !parseIP(addressText, address)) {

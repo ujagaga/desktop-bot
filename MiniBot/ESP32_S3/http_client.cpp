@@ -152,6 +152,16 @@ void HTTP_CLIENT_Init() {
   }, ARDUINO_EVENT_WIFI_STA_GOT_IP);
 }
 
+bool HTTP_CLIENT_RequestCheck() {
+  if (WiFi.status() != WL_CONNECTED || pending) return false;
+  pending = true;
+  attempts = 0;
+  nextAttempt = millis();
+  connectedAt = nextAttempt;
+  Serial.println("OTA: manual check scheduled");
+  return true;
+}
+
 void HTTP_CLIENT_Process() {
   if (connectedEvent.exchange(false)) {
     pending = true;

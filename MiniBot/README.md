@@ -63,6 +63,11 @@ The command interface is available through USB `Serial` and the GPIO UART `Seria
 commands to 127 bytes, excluding the newline. Successful commands end with `OK`;
 failures return `ERR ...`. Responses go to the originating console.
 
+Use `ota check` to request an S3 firmware check while it is connected to Wi-Fi.
+Use `cam ota check` to forward a check request to the connected CAM; check CAM
+OTA progress in its web UI. These commands schedule checks and do not wake a
+sleeping or disconnected module.
+
 ## Microphone and speaker demo
 
 The INMP441 microphone and MAX98357A speaker amplifier share an I2S bus on the
