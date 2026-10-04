@@ -17,6 +17,7 @@
 #include "gyro.h"
 #include "config.h"
 #include "faces.h"
+#include "audio.h"
 
 
 #define COMMS_BAUD 115200
@@ -587,6 +588,7 @@ static bool cmdHelp(Print *output, const char *args) {
   (void)args;
   output->println("Commands:");
   output->println("  help");
+  output->println("  audio test");
   output->println("  batt c");
   output->println("  batt v");
   output->println("  gyro angle <x|y|z|0|1|2>");
@@ -614,6 +616,15 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  wifi off");
   output->println("  wifi on <ssid> <pass>");
   return true;
+}
+
+static bool cmdAudio(Print *output, const char *args) {
+  char subcmd[16], extra[2];
+  if (sscanf(args, "%15s %1s", subcmd, extra) != 1 || strcasecmp(subcmd, "test") != 0) {
+    output->println("ERR audio test");
+    return false;
+  }
+  return AUDIO_Test(*output);
 }
 
 static bool cmdLCDClear(Print *output, const char *args) {
@@ -736,6 +747,7 @@ struct CommandEntry {
 
 static const CommandEntry commandMap[] = {
   { "help", cmdHelp },
+  { "audio", cmdAudio },
   { "bat", cmdBattery },
   { "batt", cmdBattery },
   { "gyro", cmdGyro },

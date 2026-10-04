@@ -63,6 +63,25 @@ The command interface is available through USB `Serial` and the GPIO UART `Seria
 commands to 127 bytes, excluding the newline. Successful commands end with `OK`;
 failures return `ERR ...`. Responses go to the originating console.
 
+## Microphone and speaker demo
+
+The INMP441 microphone and MAX98357A speaker amplifier share an I2S bus on the
+ESP32-S3:
+
+| Signal | GPIO |
+| --- | ---: |
+| I2S BCLK / microphone SCK | 2 |
+| I2S WS / microphone WS | 3 |
+| Amplifier shutdown/enable | 4 |
+| Speaker I2S DIN | 5 |
+| Microphone I2S SD | 1 |
+
+The microphone is powered from 3V3, with its L/R pin grounded for the left I2S
+slot. Run `audio test` from either command port: the speaker plays a short tone,
+the microphone records two seconds, then the recording is played through the
+speaker. This is an on-device bring-up test; it does not upload audio to the
+server or Gemini.
+
 ## Tap sleep and wake
 
 GPIO7 capacitive touch support and its commands have been removed. The IMU

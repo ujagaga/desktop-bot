@@ -10,11 +10,13 @@
 #include "http_client.h"
 #include "http_server.h"
 #include "gyro.h"
+#include "audio.h"
 
 
 void setup() {
   LCD_Init();
   COMMS_Init();
+  if (!AUDIO_Init()) Serial.println("AUDIO: I2S init failed");
   HTTP_CLIENT_Init();
   WIFI_Init();
   MOTOR_Init();
