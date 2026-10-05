@@ -108,3 +108,22 @@ size_t AUDIO_Read(int32_t *samples, size_t count) {
   xSemaphoreGive(audioMutex);
   return bytes / sizeof(samples[0]);
 }
+
+size_t AUDIO_Write(const int16_t *samples, size_t count) {
+  if (!audioReady) return 0;
+  int32_t wide[AUDIO_TONE_CHUNK_SAMPLES];
+  size_t written = 0;
+  while (written < count) {
+    size_t chunk = count - written;
+    if (chunk > AUDIO_TONE_CHUNK_SAMPLES) chunk = AUDIO_TONE_CHUNK_SAMPLES;
+    for (size_t i = 0; i < chunk; ++i) wide[i] = (int32_t)samples[written + i] << 16;
+    size_t bytes = chunk * sizeof(wide[0]);
+    if (audioI2S.write((const uint8_t *)wide, bytes) != bytes) break;
+    written += chunk;
+  }
+  return written;
+}
+
+void AUDIO_SetAmp(bool on) {
+  digitalWrite(AUDIO_AMP_SD_GPIO, on ? HIGH : LOW);
+}

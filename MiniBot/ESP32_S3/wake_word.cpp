@@ -36,6 +36,7 @@ int ignoreSlices = -MIN_SLICES_BEFORE_DETECTION;
 
 const char *initError = "not started";
 volatile bool detectionPending = false;
+StreamBufferHandle_t volatile captureBuffer = nullptr;
 volatile uint32_t detectionCount = 0;
 volatile uint32_t inferenceCount = 0;
 volatile uint8_t maxProbability = 0;
@@ -144,6 +145,7 @@ void checkDetection() {
 void listenTask(void *) {
   int32_t raw[SAMPLES_PER_STEP];
   int16_t samples[SAMPLES_PER_STEP];
+  bool wasCapturing = false;
   for (;;) {
     size_t count = AUDIO_Read(raw, SAMPLES_PER_STEP);
     if (!count) {
@@ -154,6 +156,20 @@ void listenTask(void *) {
       samples[i] = (int16_t)(raw[i] >> 16);  // INMP441: 24-bit data, MSB-aligned in 32 bits
       int16_t level = abs(samples[i]);
       if (level > peakSample) peakSample = level;
+    }
+
+    StreamBufferHandle_t capture = captureBuffer;
+    if (capture) {
+      xStreamBufferSend(capture, samples, count * sizeof(samples[0]), 0);
+      wasCapturing = true;
+      continue;
+    }
+    if (wasCapturing) {
+      // Start detection fresh after a conversation, with the usual quiet second.
+      FrontendReset(&frontendState);
+      memset(probabilities, 0, sizeof(probabilities));
+      ignoreSlices = -MIN_SLICES_BEFORE_DETECTION;
+      wasCapturing = false;
     }
 
     const int16_t *pending = samples;
@@ -188,6 +204,10 @@ bool WAKEWORD_Init() {
   }
   initError = nullptr;
   return true;
+}
+
+void WAKEWORD_SetCapture(StreamBufferHandle_t buffer) {
+  captureBuffer = buffer;
 }
 
 bool WAKEWORD_TakeDetection() {

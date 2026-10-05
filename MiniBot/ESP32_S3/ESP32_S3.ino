@@ -12,6 +12,7 @@
 #include "gyro.h"
 #include "audio.h"
 #include "wake_word.h"
+#include "voice.h"
 #include "faces.h"
 #include <esp_ota_ops.h>
 
@@ -30,6 +31,7 @@ void setup() {
   BATT_Init();
   if (!AUDIO_Init()) Serial.println("AUDIO: I2S init failed");
   if (!WAKEWORD_Init()) Serial.println("WAKEWORD: init failed");
+  if (!VOICE_Init()) Serial.println("VOICE: init failed");
   HTTP_CLIENT_Init();
   WIFI_Init();
   MOTOR_Init();
@@ -51,5 +53,9 @@ void loop() {
   if (taps >= GYRO_GetSleepTapThreshold()) COMMS_Execute("sleep", Serial);
   HTTP_SERVER_Process();
   HTTP_CLIENT_Process();
-  if (WAKEWORD_TakeDetection()) FACE_Show(4);  // 04_surprised: listening
+  if (WAKEWORD_TakeDetection()) {
+    FACE_Show(4);  // 04_surprised: listening
+    VOICE_Start();
+  }
+  VOICE_Process();
 }

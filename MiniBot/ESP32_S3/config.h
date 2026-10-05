@@ -2,7 +2,7 @@
 #define MINIBOT_CONFIG_H
 
 // Update before building a new firmware release.
-#define FIRMWARE_VERSION 23
+#define FIRMWARE_VERSION 24
 
 #define OTA_GITHUB_REPOSITORY "ujagaga/desktop-bot"
 #define OTA_GITHUB_BRANCH "main"

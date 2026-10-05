@@ -109,6 +109,37 @@ slowest inference, peak 16-bit microphone level, and tensor arena use since the
 previous `ww`. Say the wake word, then run `ww`, to see how close it came to the
 247/255 cutoff.
 
+## Voice conversation
+
+A detection plays a quiet three-tone chime and opens a session with the Gemini
+gateway on the Pi (`server/conversation.py`), normally through
+`wss://face.ujagaga.in.rs/conversation`. The wake word task hands its microphone
+audio to `ESP32_S3/voice.cpp` from the moment of detection, so speech during
+the TLS connect is buffered (2 s), then sent as 100 ms frames of 16 kHz PCM.
+Gemini decides when you have finished speaking and replies with audio, which a
+playback task plays through the amplifier (60 s PSRAM buffer). There is no
+echo cancellation: while anything plays, and for 300 ms after, microphone audio
+is discarded and `audio_end` is sent. After a reply the session stays open for
+8 seconds of follow-up; it closes after 8 seconds without speech or replies,
+on errors, or after 3 minutes. Face 04 shows during the session; the status
+screen returns when it ends. Wake word detection is paused during a session.
+
+```text
+voice
+voice url <wss://host[:port]/path>
+voice key <api-key>
+voice start
+voice stop
+```
+
+- `voice` prints the state, URL, whether a key is set, the session count, audio
+  seconds sent and received, dropped reply bytes, and the last error.
+- `voice url` and `voice key` save the gateway URL and the device API key
+  (`API_KEY` in the Pi's `server/appsettings.py`) in Preferences
+  (`miniBotVoice`). The key is never printed. Do not compile it into the
+  firmware: the repository and OTA binaries are public.
+- `voice start` opens a session without the wake word; `voice stop` ends it.
+
 ## Tap sleep and wake
 
 GPIO7 capacitive touch support and its commands have been removed. The IMU
@@ -420,6 +451,7 @@ allocation is needed between these modules.
 | `miniBotGyro` | `wake_taps`, `sleep_taps` | Minimum wake/sleep tap counts |
 | `miniBotLCD` | `bg`, `fg` | LCD RGB565 colors |
 | `miniBotOTA` | `target` | Advertised OTA target for restart validation |
+| `miniBotVoice` | `url`, `key` | Gemini gateway URL and device API key |
 
 These settings survive normal restarts and application OTA updates. `wifi clear`
 only clears Wi-Fi credentials. Browser command history lives in the browser,
@@ -435,8 +467,9 @@ dependencies. The build script also passes `--libraries libraries`, which holds
 `ESP32_S3/build_opt.h` enables ESP-NN's ESP32-S3 assembly kernels for the
 whole build. Python 3 is needed for IntelliSense generation; Pillow
 is needed only when regenerating face assets. The project uses the `esp32:esp32:esp32s3` board target with
-`FlashSize=16M,PartitionScheme=app3M_fat9M_16MB`: two 3 MiB OTA firmware
-slots and approximately 10 MiB of FAT filesystem space on the 16 MB flash.
+`FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi`: two 3 MiB OTA firmware
+slots and approximately 10 MiB of FAT filesystem space on the 16 MB flash, plus
+the 8 MB octal PSRAM, which holds the voice conversation audio buffers.
 The build script and VS Code Arduino settings select this layout by default.
 
 Compile only:
@@ -454,7 +487,7 @@ tools/build_s3.sh upload
 Override the board or serial port with environment variables:
 
 ```bash
-FQBN='esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB' PORT=/dev/ttyUSB0 tools/build_s3.sh upload
+FQBN='esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi' PORT=/dev/ttyUSB0 tools/build_s3.sh upload
 ```
 
 Close the serial monitor before uploading so it does not hold the serial port open.
@@ -528,6 +561,7 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 - `ESP32_S3/audio.cpp`: I2S microphone/speaker, shared with the wake word task
 - `ESP32_S3/wake_word.cpp`: microWakeWord listener task
 - `ESP32_S3/wake_word_model.h`: embedded `hey_jarvis` model
+- `ESP32_S3/voice.cpp`: Gemini gateway WebSocket session, chime, and reply playback
 - `libraries/microfrontend/`: TFLite Micro audio frontend library
 - `ESP32_S3/motor.cpp`: timed motor control
 - `ESP32_S3/wifi_connection.cpp`: stored Wi-Fi credentials and connection management

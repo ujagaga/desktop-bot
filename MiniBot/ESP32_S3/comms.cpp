@@ -11,6 +11,7 @@
 #include "comms.h"
 #include "battery.h"
 #include "wake_word.h"
+#include "voice.h"
 #include "wifi_connection.h"
 #include "clock.h"
 #include "lcd.h"
@@ -142,6 +143,36 @@ static bool cmdBattery(Print *output, const char *args) {
 static bool cmdWakeWord(Print *output, const char *args) {
   (void)args;
   return WAKEWORD_PrintStatus(*output);
+}
+
+static bool cmdVoice(Print *output, const char *args) {
+  char subcmd[8];
+  if (sscanf(args, "%7s", subcmd) != 1) {
+    VOICE_PrintStatus(*output);
+    return true;
+  }
+  const char *value = args + strlen(subcmd);
+  while (isspace(*value)) value++;
+  if (strcasecmp(subcmd, "start") == 0) {
+    VOICE_Start();
+    return true;
+  }
+  if (strcasecmp(subcmd, "stop") == 0) {
+    VOICE_Stop();
+    return true;
+  }
+  if (strcasecmp(subcmd, "url") == 0) {
+    if (VOICE_SetUrl(value)) return true;
+    output->println("ERR voice url <wss://host[:port]/path>");
+    return false;
+  }
+  if (strcasecmp(subcmd, "key") == 0) {
+    if (VOICE_SetKey(value)) return true;
+    output->println("ERR voice key <api-key>");
+    return false;
+  }
+  output->println("ERR voice [start|stop|url <url>|key <key>]");
+  return false;
 }
 
 static bool cmdSleep(Print *output, const char *args) {
@@ -604,6 +635,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt v");
   output->println("  batt chg");
   output->println("  ww");
+  output->println("  voice [start|stop|url <url>|key <key>]");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
   output->println("  gyro tap sleep [1-3] (sleep at or above selected count)");
@@ -796,6 +828,7 @@ static const CommandEntry commandMap[] = {
   { "motor", cmdMotor },
   { "sleep", cmdSleep },
   { "time", cmdTime },
+  { "voice", cmdVoice },
   { "wifi", cmdWifi },
   { "ww", cmdWakeWord },
 };

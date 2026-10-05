@@ -15,8 +15,8 @@ SKETCH_DIR="$REPO_DIR/ESP32_S3"
 BUILD_DIR="$SKETCH_DIR/build"
 CACHE_DIR="$SKETCH_DIR/.cache"
 [ -f "$REPO_DIR/.env" ] && source "$REPO_DIR/.env"
-# 16 MB flash, two 3 MiB OTA slots; NVS remains at 0x9000 (20 KiB).
-FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB}"
+# 16 MB flash, two 3 MiB OTA slots; NVS remains at 0x9000 (20 KiB). 8 MB octal PSRAM holds voice audio buffers.
+FQBN="${FQBN:-esp32:esp32:esp32s3:FlashSize=16M,PartitionScheme=app3M_fat9M_16MB,PSRAM=opi}"
 PORT="${PORT:-/dev/ttyACM0}"
 
 command -v arduino-cli >/dev/null 2>&1 || {
