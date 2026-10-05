@@ -196,8 +196,10 @@ async def conversation(request):
                 headers={'x-goog-api-key': config['gemini_key']}, heartbeat=30,
                 max_msg_size=4 * 1024 * 1024, timeout=aiohttp.ClientWSTimeout(ws_close=5)) as upstream:
                 await upstream.send_json(setup_message(config))
-                first = await upstream.receive_json(timeout=20)
-                if 'setupComplete' not in first:
+                # Gemini sends JSON in binary frames, including setupComplete.
+                first = await upstream.receive(timeout=20)
+                if (first.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY)
+                        or 'setupComplete' not in json.loads(first.data)):
                     raise RuntimeError('Gemini setup failed.')
                 await device.send_json({'type': 'ready', 'input_audio': 'pcm_s16le',
                     'input_sample_rate': 16000, 'output_sample_rate': OUTPUT_SAMPLE_RATE, 'channels': 1})

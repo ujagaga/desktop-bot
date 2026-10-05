@@ -25,7 +25,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
                 await ws.send_json({'error': {'message': 'secret cloud-secret provider detail'}})
                 await ws.close()
                 return ws
-            await ws.send_json({'setupComplete': {}})
+            await ws.send_bytes(b'{"setupComplete": {}}')  # binary, like real Gemini
             async for msg in ws:
                 if msg.type == WSMsgType.TEXT:
                     import json
