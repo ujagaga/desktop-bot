@@ -273,23 +273,9 @@ static bool cmdMotorRotate(Print *output, const char *args) {
   MOTOR_Set(2, motor2Forward, pwmPercent);
 
   bool correctingOvershoot = false;
-  unsigned long lastDebugMs = startMs;
-  unsigned long readCount = 0, readTotalUs = 0, readMaxUs = 0;
   while (millis() - startMs < MOTOR_ROTATE_TIMEOUT_MS) {
-    unsigned long readStartUs = micros();
     GYRO_UpdateAxis(axis);
-    unsigned long readUs = micros() - readStartUs;
-    readCount++;
-    readTotalUs += readUs;
-    if (readUs > readMaxUs) readMaxUs = readUs;
     float deltaDegrees = direction * (GYRO_GetAngleDegrees(axis) - startDegrees);
-
-    if (millis() - lastDebugMs >= 100) {
-      lastDebugMs = millis();
-      output->printf("ROTATE dbg t=%lu delta=%.2f fix=%d reads=%lu avg=%luus max=%luus\n",
-                    millis() - startMs, deltaDegrees, correctingOvershoot, readCount,
-                    readTotalUs / readCount, readMaxUs);
-    }
 
     if (!correctingOvershoot && deltaDegrees >= targetDegrees) {
       if (deltaDegrees <= targetDegrees + MOTOR_ROTATE_OVERSHOOT_DEGREES) break;
