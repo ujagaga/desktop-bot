@@ -3,6 +3,8 @@ import asyncio
 import base64
 import unittest
 
+import numpy as np
+
 from aiohttp import web, WSMsgType
 from aiohttp.test_utils import TestClient, TestServer
 import conversation
@@ -54,7 +56,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         ws = await self.client.ws_connect('/conversation', headers=self.headers)
         ready = await ws.receive_json(timeout=2)
         self.assertEqual(ready['type'], 'ready')
-        self.assertEqual(ready['output_sample_rate'], 24000)
+        self.assertEqual(ready['output_sample_rate'], 16000)
         return ws
 
     async def test_auth_and_missing_configuration(self):
@@ -78,9 +80,9 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         await ws.send_json({'type': 'text', 'text': 'Hello'})
         self.assertTrue((await asyncio.wait_for(self.messages.get(), 2))['clientContent']['turnComplete'])
         await self.provider.send_json({'serverContent': {
-            'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': 'AAA='}}]},
+            'modelTurn': {'parts': [{'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': 'AAAAAAAA'}}]},
             'outputTranscription': {'text': 'Hello!'}, 'turnComplete': True}})
-        self.assertEqual((await ws.receive(timeout=2)).data, b'\x00\x00')
+        self.assertEqual((await ws.receive(timeout=2)).data, b'\x00' * 4)
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'transcript')
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'turn_complete')
         await self.provider.send_json({'serverContent': {'interrupted': True}})
@@ -126,6 +128,19 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         await self.provider.send_json({'goAway': {'timeLeft': '30s'}})
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'session_ending')
         self.assertEqual((await ws.receive(timeout=2)).type, WSMsgType.CLOSE)
+
+
+class DownsamplerTests(unittest.TestCase):
+    def test_chunked_output_matches_one_shot_and_keeps_pitch(self):
+        tone = (8000 * np.sin(2 * np.pi * 1000 * np.arange(2400) / 24000)).astype('<i2').tobytes()
+        whole = conversation.Downsampler().process(tone)
+        chunked = conversation.Downsampler()
+        parts = b''.join(chunked.process(tone[i:i + n]) for i, n in zip(range(0, 4800, 902), [902] * 6))
+        self.assertEqual(len(whole), 1600 * 2)
+        self.assertEqual(parts, whole)
+        out = np.frombuffer(whole, '<i2')[100:].astype(np.float32)
+        spectrum = np.abs(np.fft.rfft(out))
+        self.assertAlmostEqual(np.argmax(spectrum) * 16000 / len(out), 1000, delta=20)
 
 
 if __name__ == '__main__':
