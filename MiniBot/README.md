@@ -33,7 +33,7 @@ Wi-Fi access and the HTTP API.
 | Motor 1 | 9 / 10 |
 | Motor 2 | 11 / 12 |
 | Battery ADC | 6 |
-| Charger detect (68K from header 5V, 100K to GND) | 8 |
+| Charger detect (LOW while charging, MOSFET to GND, internal pull-up) | 8 |
 | LCD SCLK | 40 |
 | LCD MOSI | 41 |
 | LCD CS | 39 |
@@ -88,6 +88,27 @@ the microphone records two seconds, then the recording is played through the
 speaker. This is an on-device bring-up test; it does not upload audio to the
 server or Gemini.
 
+## Wake word
+
+While the S3 is awake it listens for **"Hey Jarvis"** with
+[microWakeWord](https://github.com/kahrendt/microWakeWord) (ESPHome `hey_jarvis`
+v2 model, `ESP32_S3/wake_word_model.h`). A detection shows face 04 on the LCD.
+The listener runs as a FreeRTOS task on core 0: 10 ms I2S reads, a TFLite Micro
+audio frontend (40 mel features, 30 ms window), and one inference every 30 ms.
+Frontend settings, feature scaling, cutoff (0.97) and 5-inference sliding
+window match ESPHome's `micro_wake_word`; a detection, like boot, is followed by
+one second that cannot trigger again. `audio test` pauses the listener while it
+uses the I2S bus.
+
+```text
+ww
+```
+
+Prints detections and inferences since boot, plus the maximum probability,
+slowest inference, peak 16-bit microphone level, and tensor arena use since the
+previous `ww`. Say the wake word, then run `ww`, to see how close it came to the
+247/255 cutoff.
+
 ## Tap sleep and wake
 
 GPIO7 capacitive touch support and its commands have been removed. The IMU
@@ -131,7 +152,7 @@ batt chg
 
 - `batt c` returns the battery percentage as an integer.
 - `batt v` returns the measured battery voltage in volts.
-- `batt chg` returns `1` while charger 5V is present on the header 5V pin, else `0`.
+- `batt chg` returns `1` while charger 5V is present (a MOSFET pulls GPIO8 LOW), else `0`.
 - `bat` is also accepted as an alias for `batt`.
 
 Voltage averages eight ADC readings with the onboard 2:1 divider correction.
@@ -351,7 +372,9 @@ sleep
 ```
 
 Stops both motors, enters light sleep, and waits for the configured IMU tap
-count or UART0 activity. UART0 wake is distinct from the `Serial2` command port;
+count, charger connect, or UART0 activity. Charger connect (GPIO8 pulled LOW)
+is armed only when the robot is not already charging, because GPIO wake is
+level-triggered; it completes the wake without a tap count. UART0 wake is distinct from the `Serial2` command port;
 GPIO13/14 are not configured as the sleep wake source. INT1 on
 GPIO46 provides the first motion interrupt. The LCD and Wi-Fi remain off while
 software confirms the configured tap count. IMU wakes retain gyro bias; UART wakes
@@ -405,8 +428,12 @@ not in device Preferences.
 ## Build and upload
 
 Install `arduino-cli`, the ESP32 Arduino core, and the Arduino libraries
-`Adafruit GFX Library`, `Adafruit ST7735 and ST7789 Library`, and `ArduinoJson`
-(with their dependencies). Python 3 is needed for IntelliSense generation; Pillow
+`Adafruit GFX Library`, `Adafruit ST7735 and ST7789 Library`, `ArduinoJson`,
+and `ESP_TF@2.1.1` (TFLite Micro with ESP-NN, for the wake word), with their
+dependencies. The build script also passes `--libraries libraries`, which holds
+`microfrontend`, the TFLite Micro audio frontend copied from tflite-micro.
+`ESP32_S3/build_opt.h` enables ESP-NN's ESP32-S3 assembly kernels for the
+whole build. Python 3 is needed for IntelliSense generation; Pillow
 is needed only when regenerating face assets. The project uses the `esp32:esp32:esp32s3` board target with
 `FlashSize=16M,PartitionScheme=app3M_fat9M_16MB`: two 3 MiB OTA firmware
 slots and approximately 10 MiB of FAT filesystem space on the 16 MB flash.
@@ -497,7 +524,11 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 - `ESP32_S3/tap_sequence.h`: tap grouping and quiet-interval detection
 - `ESP32_S3/gyro.cpp`: QMI8658 driver, calibration, rates, and angle integration
 - `ESP32_S3/clock.cpp`: Belgrade timezone and NTP synchronization
-- `ESP32_S3/battery.cpp`: battery measurement and status refresh
+- `ESP32_S3/battery.cpp`: battery measurement, status refresh, and charger detect/wake
+- `ESP32_S3/audio.cpp`: I2S microphone/speaker, shared with the wake word task
+- `ESP32_S3/wake_word.cpp`: microWakeWord listener task
+- `ESP32_S3/wake_word_model.h`: embedded `hey_jarvis` model
+- `libraries/microfrontend/`: TFLite Micro audio frontend library
 - `ESP32_S3/motor.cpp`: timed motor control
 - `ESP32_S3/wifi_connection.cpp`: stored Wi-Fi credentials and connection management
 - `tools/build_s3.sh`: build and upload script
@@ -532,6 +563,13 @@ The multiplier is saved under `miniBotGyro` / `tap_mult` and restored at boot.
 Repeating a saved value avoids another flash write. Previous additive
 `wake_mg` settings are ignored because their meaning differs; the initial
 multiplier is 1. Removed touch calibration data is no longer used.
+
+### OTA rollback
+
+A new image stays pending verification for its first 60 seconds
+(`verifyRollbackLater()` in `ESP32_S3.ino`); the loop then marks it valid. A
+crash or reset before that makes the bootloader boot the previous image, and
+the invalid-target protection below stops the same version being re-downloaded.
 
 ### Invalid OTA target protection
 

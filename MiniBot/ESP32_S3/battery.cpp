@@ -2,6 +2,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <stdio.h>
+#include <driver/gpio.h>
+#include <esp_sleep.h>
 #include "battery.h"
 #include "lcd.h"
 #include "clock.h"
@@ -12,8 +14,8 @@
 #define BAT_ADC_PIN 6
 #define BAT_DIVIDER_RATIO 2.0f  // R8=R10=100K on-board divider
 
-// Charger detect: header 5V pin (USB VCC) -> 68K -> GPIO8 -> 100K -> GND.
-// Plain input: the internal pull-down would load the divider below the HIGH threshold.
+// Charger detect: a MOSFET driven by charger 5V pulls GPIO8 LOW; internal pull-up
+// (kept during light sleep) holds it HIGH otherwise.
 #define CHARGER_DETECT_PIN 8
 
 // LiIon 1S range used to map voltage to a 0-100% level.
@@ -44,11 +46,21 @@ float BATT_GetVoltage() {
 }
 
 void BATT_Init() {
-  pinMode(CHARGER_DETECT_PIN, INPUT);
+  pinMode(CHARGER_DETECT_PIN, INPUT_PULLUP);
 }
 
 bool BATT_IsCharging() {
-  return digitalRead(CHARGER_DETECT_PIN) == HIGH;
+  return digitalRead(CHARGER_DETECT_PIN) == LOW;
+}
+
+bool BATT_ArmChargerWake() {
+  if (BATT_IsCharging()) return false;
+  return gpio_wakeup_enable((gpio_num_t)CHARGER_DETECT_PIN, GPIO_INTR_LOW_LEVEL) == ESP_OK &&
+         esp_sleep_enable_gpio_wakeup() == ESP_OK;
+}
+
+void BATT_DisarmChargerWake() {
+  gpio_wakeup_disable((gpio_num_t)CHARGER_DETECT_PIN);
 }
 
 int BATT_GetPercent() {

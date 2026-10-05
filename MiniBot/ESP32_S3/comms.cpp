@@ -10,6 +10,7 @@
 #include <driver/gpio.h>
 #include "comms.h"
 #include "battery.h"
+#include "wake_word.h"
 #include "wifi_connection.h"
 #include "clock.h"
 #include "lcd.h"
@@ -138,6 +139,11 @@ static bool cmdBattery(Print *output, const char *args) {
   return false;
 }
 
+static bool cmdWakeWord(Print *output, const char *args) {
+  (void)args;
+  return WAKEWORD_PrintStatus(*output);
+}
+
 static bool cmdSleep(Print *output, const char *args) {
   (void)output;
   (void)args;
@@ -187,7 +193,7 @@ static bool cmdSleep(Print *output, const char *args) {
     output->println("ERR cannot hold CAM wake line; sleep cancelled");
     return false;
   }
-  Serial.println("Sleeping until multiple taps or UART activity...");
+  Serial.println("Sleeping until multiple taps, charger connect or UART activity...");
   Serial.flush();
 
   LCD_BacklightOff();
@@ -197,10 +203,14 @@ static bool cmdSleep(Print *output, const char *args) {
   esp_err_t sleepResult;
   bool gyroRestored;
   for (;;) {
+    bool chargerArmed = BATT_ArmChargerWake();
     sleepResult = esp_light_sleep_start();
-    bool motionWake = sleepResult == ESP_OK &&
-                      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
-    gyroRestored = GYRO_RestoreAfterSleep(sleepResult == ESP_OK && !motionWake);
+    BATT_DisarmChargerWake();
+    bool gpioWake = sleepResult == ESP_OK &&
+                    esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
+    // IMU INT1 and charger detect share the GPIO wake cause; a charger wake is a full wake.
+    bool motionWake = gpioWake && !(chargerArmed && BATT_IsCharging());
+    gyroRestored = GYRO_RestoreAfterSleep(sleepResult == ESP_OK && !gpioWake);
     if (!gyroRestored || !motionWake || GYRO_ConfirmTapWake()) break;
     // An isolated tap is not a user-visible wake: leave LCD/Wi-Fi off.
     if (!GYRO_PrepareForSleep()) {
@@ -593,6 +603,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt c");
   output->println("  batt v");
   output->println("  batt chg");
+  output->println("  ww");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
   output->println("  gyro tap sleep [1-3] (sleep at or above selected count)");
@@ -786,6 +797,7 @@ static const CommandEntry commandMap[] = {
   { "sleep", cmdSleep },
   { "time", cmdTime },
   { "wifi", cmdWifi },
+  { "ww", cmdWakeWord },
 };
 
 static void dispatch(Print *output, char *line) {

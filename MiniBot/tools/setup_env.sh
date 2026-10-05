@@ -60,6 +60,7 @@ arduino-cli lib install \
   "NTPClient" \
   "Timezone" \
   "ESP_EEPROM" \
-  "WebSockets"
+  "WebSockets" \
+  "ESP_TF@2.1.1"
 
 echo "Done. Build with: tools/build.sh"

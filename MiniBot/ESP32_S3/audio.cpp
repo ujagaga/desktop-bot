@@ -17,6 +17,8 @@ constexpr size_t AUDIO_TONE_CHUNK_SAMPLES = 256;
 
 I2SClass audioI2S;
 bool audioReady = false;
+// Serializes the wake word reader and the speaker/record test.
+SemaphoreHandle_t audioMutex = nullptr;
 
 bool playTestTone() {
   int32_t samples[AUDIO_TONE_CHUNK_SAMPLES];
@@ -43,13 +45,14 @@ bool AUDIO_Init() {
   pinMode(AUDIO_AMP_SD_GPIO, OUTPUT);
   digitalWrite(AUDIO_AMP_SD_GPIO, LOW);
 
+  audioMutex = xSemaphoreCreateMutex();
   audioI2S.setPins(AUDIO_BCLK_GPIO, AUDIO_WS_GPIO, AUDIO_SPEAKER_DATA_GPIO, AUDIO_MIC_DATA_GPIO);
   audioReady = audioI2S.begin(I2S_MODE_STD, AUDIO_SAMPLE_RATE, I2S_DATA_BIT_WIDTH_32BIT,
                               I2S_SLOT_MODE_MONO, I2S_STD_SLOT_LEFT);
   return audioReady;
 }
 
-bool AUDIO_Test(Print &output) {
+static bool runTest(Print &output) {
   if (!audioReady) {
     output.println("ERR audio I2S unavailable");
     return false;
@@ -86,4 +89,22 @@ bool AUDIO_Test(Print &output) {
   digitalWrite(AUDIO_AMP_SD_GPIO, LOW);
   output.println("Audio test complete");
   return true;
+}
+
+bool AUDIO_Test(Print &output) {
+  if (!audioMutex) {
+    output.println("ERR audio I2S unavailable");
+    return false;
+  }
+  xSemaphoreTake(audioMutex, portMAX_DELAY);
+  bool ok = runTest(output);
+  xSemaphoreGive(audioMutex);
+  return ok;
+}
+
+size_t AUDIO_Read(int32_t *samples, size_t count) {
+  if (!audioReady || xSemaphoreTake(audioMutex, 0) != pdTRUE) return 0;
+  size_t bytes = audioI2S.readBytes((char *)samples, count * sizeof(samples[0]));
+  xSemaphoreGive(audioMutex);
+  return bytes / sizeof(samples[0]);
 }

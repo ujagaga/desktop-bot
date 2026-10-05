@@ -25,7 +25,7 @@ command -v arduino-cli >/dev/null 2>&1 || {
 }
 
 echo "Compiling $SKETCH_DIR for $FQBN ..."
-arduino-cli compile --fqbn "$FQBN" --output-dir "$BUILD_DIR" --build-path "$CACHE_DIR" "$SKETCH_DIR"
+arduino-cli compile --fqbn "$FQBN" --libraries "$REPO_DIR/libraries" --output-dir "$BUILD_DIR" --build-path "$CACHE_DIR" "$SKETCH_DIR"
 
 python3 "$REPO_DIR/tools/update_intellisense.py"
 

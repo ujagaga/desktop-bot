@@ -11,6 +11,17 @@
 #include "http_server.h"
 #include "gyro.h"
 #include "audio.h"
+#include "wake_word.h"
+#include "faces.h"
+#include <esp_ota_ops.h>
+
+// Keep a freshly installed OTA image pending until it has run for a minute;
+// a crash or reset before that makes the bootloader roll back to the previous image.
+#define APP_CONFIRM_MS 60000UL
+
+extern "C" bool verifyRollbackLater() {
+  return true;
+}
 
 
 void setup() {
@@ -18,6 +29,7 @@ void setup() {
   COMMS_Init();
   BATT_Init();
   if (!AUDIO_Init()) Serial.println("AUDIO: I2S init failed");
+  if (!WAKEWORD_Init()) Serial.println("WAKEWORD: init failed");
   HTTP_CLIENT_Init();
   WIFI_Init();
   MOTOR_Init();
@@ -25,6 +37,11 @@ void setup() {
 }
 
 void loop() {
+  static bool appConfirmed = false;
+  if (!appConfirmed && millis() > APP_CONFIRM_MS) {
+    esp_ota_mark_app_valid_cancel_rollback();
+    appConfirmed = true;
+  }
   COMMS_Poll();
   CLOCK_Process();
   BATT_process();
@@ -34,4 +51,5 @@ void loop() {
   if (taps >= GYRO_GetSleepTapThreshold()) COMMS_Execute("sleep", Serial);
   HTTP_SERVER_Process();
   HTTP_CLIENT_Process();
+  if (WAKEWORD_TakeDetection()) FACE_Show(4);  // 04_surprised: listening
 }
