@@ -117,7 +117,7 @@ static bool cmdBacklight(Print *output, const char *args) {
 static bool cmdBattery(Print *output, const char *args) {
   char subcmd[4];
   if (sscanf(args, "%3s", subcmd) != 1) {
-    output->println("ERR batt <c|v>");
+    output->println("ERR batt <c|v|chg>");
     return false;
   }
 
@@ -129,8 +129,12 @@ static bool cmdBattery(Print *output, const char *args) {
     output->printf("%.2f\n", BATT_GetVoltage());
     return true;
   }
+  if (strcasecmp(subcmd, "chg") == 0) {
+    output->println(BATT_IsCharging() ? 1 : 0);
+    return true;
+  }
 
-  output->println("ERR batt <c|v>");
+  output->println("ERR batt <c|v|chg>");
   return false;
 }
 
@@ -588,6 +592,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  cam ota check");
   output->println("  batt c");
   output->println("  batt v");
+  output->println("  batt chg");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
   output->println("  gyro tap sleep [1-3] (sleep at or above selected count)");

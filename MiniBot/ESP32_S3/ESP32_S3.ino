@@ -16,6 +16,7 @@
 void setup() {
   LCD_Init();
   COMMS_Init();
+  BATT_Init();
   if (!AUDIO_Init()) Serial.println("AUDIO: I2S init failed");
   HTTP_CLIENT_Init();
   WIFI_Init();

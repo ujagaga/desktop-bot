@@ -33,6 +33,7 @@ Wi-Fi access and the HTTP API.
 | Motor 1 | 9 / 10 |
 | Motor 2 | 11 / 12 |
 | Battery ADC | 6 |
+| Charger detect (68K from header 5V, 100K to GND) | 8 |
 | LCD SCLK | 40 |
 | LCD MOSI | 41 |
 | LCD CS | 39 |
@@ -125,10 +126,12 @@ help
 ```text
 batt c
 batt v
+batt chg
 ```
 
 - `batt c` returns the battery percentage as an integer.
 - `batt v` returns the measured battery voltage in volts.
+- `batt chg` returns `1` while charger 5V is present on the header 5V pin, else `0`.
 - `bat` is also accepted as an alias for `batt`.
 
 Voltage averages eight ADC readings with the onboard 2:1 divider correction.
