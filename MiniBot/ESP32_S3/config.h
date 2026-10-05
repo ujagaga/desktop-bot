@@ -2,11 +2,13 @@
 #define MINIBOT_CONFIG_H
 
 // Update before building a new firmware release.
-#define FIRMWARE_VERSION 24
+#define FIRMWARE_VERSION 25
 
 #define OTA_GITHUB_REPOSITORY "ujagaga/desktop-bot"
 #define OTA_GITHUB_BRANCH "main"
 #define OTA_FIRMWARE_DIRECTORY "MiniBot/ESP32_S3"
+// Used until `voice url` saves another. The API key is never compiled in: the repo and binaries are public.
+#define VOICE_DEFAULT_URL "wss://face.ujagaga.in.rs/conversation"
 
 // CAM GPIO13 wake line; common ground and 10k pull-down at the CAM.
 #define CAM_WAKE_OUTPUT_GPIO 7

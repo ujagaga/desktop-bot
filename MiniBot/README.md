@@ -122,7 +122,9 @@ echo cancellation: while anything plays, and for 300 ms after, microphone audio
 is discarded and `audio_end` is sent. After a reply the session stays open for
 8 seconds of follow-up; it closes after 8 seconds without speech or replies,
 on errors, or after 3 minutes. Face 04 shows during the session; the status
-screen returns when it ends. Wake word detection is paused during a session.
+screen returns when it ends. If the session cannot start or fails (no key, no
+Wi-Fi, connect or gateway error), face 02 shows for two seconds and `voice`
+reports the reason. Wake word detection is paused during a session.
 
 ```text
 voice
@@ -136,7 +138,8 @@ voice stop
   seconds sent and received, dropped reply bytes, and the last error.
 - `voice url` and `voice key` save the gateway URL and the device API key
   (`API_KEY` in the Pi's `server/appsettings.py`) in Preferences
-  (`miniBotVoice`). The key is never printed. Do not compile it into the
+  (`miniBotVoice`). Without a saved URL, `VOICE_DEFAULT_URL` from
+  `ESP32_S3/config.h` is used; there is no key fallback. The key is never printed. Do not compile it into the
   firmware: the repository and OTA binaries are public.
 - `voice start` opens a session without the wake word; `voice stop` ends it.
 

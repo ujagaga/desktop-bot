@@ -9,6 +9,8 @@
 #include <math.h>
 
 #include "audio.h"
+#include "config.h"
+#include "faces.h"
 #include "battery.h"
 #include "lcd.h"
 #include "wake_word.h"
@@ -28,6 +30,7 @@ constexpr unsigned long MAX_SESSION_MS = 180000;
 // Mic stays muted this long after the last played sample (no echo cancellation).
 constexpr unsigned long ECHO_TAIL_MS = 300;
 constexpr float CHIME_AMPLITUDE = 3000.0f;  // about -21 dBFS
+constexpr unsigned long ERROR_FACE_MS = 2000;
 
 enum class State { Idle, Connecting, Active };
 const char *const STATE_NAMES[] = { "idle", "connecting", "active" };
@@ -45,6 +48,7 @@ unsigned long startMs = 0;
 unsigned long lastActivityMs = 0;
 bool audioSinceEnd = false;
 const char *lastError = "none";
+unsigned long errorFaceMs = 0;
 uint32_t sessionCount = 0, sentBytes = 0, receivedBytes = 0, droppedBytes = 0;
 
 bool parseUrl(const String &value) {
@@ -120,16 +124,26 @@ void playTask(void *) {
   }
 }
 
+// Failures show the sad face briefly so a silent robot is not mistaken for a slow one.
+void showResult(const char *error) {
+  if (error) {
+    lastError = error;
+    FACE_Show(2);  // 02_sad
+    errorFaceMs = millis() | 1;
+  } else {
+    LCD_Clear();
+    BATT_ShowStatus();
+  }
+}
+
 void endSession(const char *error) {
   if (state == State::Idle) return;
   bool connected = socket.isConnected();
   state = State::Idle;  // before disconnect(): its event must not end the session twice
-  if (error) lastError = error;
   WAKEWORD_SetCapture(nullptr);
   if (connected) socket.sendTXT("{\"type\":\"stop\"}");
   socket.disconnect();
-  LCD_Clear();
-  BATT_ShowStatus();
+  showResult(error);
 }
 
 void handleText(const uint8_t *payload, size_t length) {
@@ -174,13 +188,14 @@ void onEvent(WStype_t type, uint8_t *payload, size_t length) {
 }
 
 bool VOICE_Init() {
+  url = VOICE_DEFAULT_URL;  // also when the namespace does not exist yet
   Preferences prefs;
   if (prefs.begin("miniBotVoice", true)) {
-    url = prefs.getString("url", "");
+    url = prefs.getString("url", VOICE_DEFAULT_URL);
     apiKey = prefs.getString("key", "");
     prefs.end();
   }
-  if (url.length()) parseUrl(url);
+  parseUrl(url);
 
   static StaticStreamBuffer_t micStruct, playStruct;
   uint8_t *micStorage = (uint8_t *)heap_caps_malloc(MIC_BUFFER_BYTES + 1, MALLOC_CAP_SPIRAM);
@@ -192,7 +207,6 @@ bool VOICE_Init() {
   micBuffer = xStreamBufferCreateStatic(MIC_BUFFER_BYTES, 1, micStorage, &micStruct);
   playBuffer = xStreamBufferCreateStatic(PLAY_BUFFER_BYTES, 1, playStorage, &playStruct);
   socket.onEvent(onEvent);
-  socket.setReconnectInterval(3600000);  // sessions reconnect only on the next wake word
   return xTaskCreatePinnedToCore(playTask, "voiceplay", 4096, nullptr, 3, nullptr, 1) == pdPASS;
 }
 
@@ -200,20 +214,17 @@ void VOICE_Start() {
   if (state != State::Idle || !playBuffer) return;
   sessionCount++;
   lastError = "none";
+  errorFaceMs = 0;
   startMs = lastActivityMs = millis();
   audioSinceEnd = false;
   drain(micBuffer);
   queueChime();
   if (!host.length() || !apiKey.length()) {
-    lastError = "not configured";
-    LCD_Clear();
-    BATT_ShowStatus();
+    showResult("not configured");
     return;
   }
   if (WiFi.status() != WL_CONNECTED) {
-    lastError = "no Wi-Fi";
-    LCD_Clear();
-    BATT_ShowStatus();
+    showResult("no Wi-Fi");
     return;
   }
   WAKEWORD_SetCapture(micBuffer);
@@ -231,6 +242,10 @@ void VOICE_Stop() {
 }
 
 void VOICE_Process() {
+  if (errorFaceMs && millis() - errorFaceMs > ERROR_FACE_MS) {
+    errorFaceMs = 0;
+    if (state == State::Idle) showResult(nullptr);
+  }
   if (state == State::Idle) return;
   socket.loop();
   if (state == State::Idle) return;
