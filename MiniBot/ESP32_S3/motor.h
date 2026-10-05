@@ -1,8 +1,8 @@
 #ifndef MOTOR_H
 #define MOTOR_H
 
-#define MOTOR_ROTATE_MOTOR1_FORWARD true
-#define MOTOR_ROTATE_MOTOR2_FORWARD false
+#define MOTOR_ROTATE_MOTOR1_FORWARD false
+#define MOTOR_ROTATE_MOTOR2_FORWARD true
 #define MOTOR_ROTATE_AXIS_INDEX 0
 
 // Attaches PWM to the H-bridge input pins.
