@@ -102,6 +102,17 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(voice['voiceName'], 'Kore')
         await ws.close()
 
+    async def test_device_voice_request_is_validated(self):
+        ws = await self.client.ws_connect('/conversation?voice=Puck', headers=self.headers)
+        await ws.receive_json(timeout=2)
+        voice = self.setup['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']
+        self.assertEqual(voice['voiceName'], 'Puck')
+        await ws.close()
+        ws = await self.client.ws_connect('/conversation?voice=Bogus', headers=self.headers)
+        await ws.receive_json(timeout=2)
+        self.assertNotIn('speechConfig', self.setup['setup']['generationConfig'])
+        await ws.close()
+
     async def test_snapshot_is_recognized_locally(self):
         ws = await self.connect()
         await ws.send_json({'type': 'snapshot', 'jpeg': base64.b64encode(b'jpeg').decode()})

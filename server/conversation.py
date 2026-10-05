@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 OUTPUT_SAMPLE_RATE = 16000
 # The ESP32 WebSocket client rejects frames above 15 KB; Gemini chunks reach about 19 KB.
 DEVICE_FRAME_BYTES = 4096
+# Gemini Live prebuilt voices a device may request with ?voice=<name>.
+VOICES = frozenset('''Zephyr Puck Charon Kore Fenrir Leda Orus Aoede Callirrhoe Autonoe Enceladus Iapetus
+    Umbriel Algieba Despina Erinome Algenib Rasalgethi Laomedeia Achernar Alnilam Schedar Gacrux
+    Pulcherrima Achird Zubenelgenubi Vindemiatrix Sadachbia Sadaltager Sulafat'''.split())
 CONFIG = web.AppKey('settings', dict)
 GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
@@ -201,7 +205,9 @@ async def conversation(request):
             async with http.ws_connect(request.app[GEMINI_ENDPOINT],
                 headers={'x-goog-api-key': config['gemini_key']}, heartbeat=30,
                 max_msg_size=4 * 1024 * 1024, timeout=aiohttp.ClientWSTimeout(ws_close=5)) as upstream:
-                await upstream.send_json(setup_message(config))
+                requested = request.query.get('voice', '')
+                session_config = {**config, 'voice': requested} if requested in VOICES else config
+                await upstream.send_json(setup_message(session_config))
                 # Gemini sends JSON in binary frames, including setupComplete.
                 first = await upstream.receive(timeout=20)
                 if (first.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY)
