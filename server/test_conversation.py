@@ -4,6 +4,7 @@ import base64
 import os
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -78,6 +79,8 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         ws = await self.connect()
         self.assertEqual(self.setup['setup']['model'], 'models/test-model')
         self.assertNotIn('speechConfig', self.setup['setup']['generationConfig'])
+        instruction = self.setup['setup']['systemInstruction']['parts'][0]['text']
+        self.assertTrue(instruction.startswith('Test instructions Current local date and time'))
         await ws.send_bytes(b'\x01\x00' * 320)
         data = await asyncio.wait_for(self.messages.get(), 2)
         self.assertEqual(base64.b64decode(data['realtimeInput']['audio']['data']), b'\x01\x00' * 320)
@@ -163,6 +166,14 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         await self.provider.send_json({'goAway': {'timeLeft': '30s'}})
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'session_ending')
         self.assertEqual((await ws.receive(timeout=2)).type, WSMsgType.CLOSE)
+
+
+class SetupMessageTests(unittest.TestCase):
+    def test_clock_is_appended_to_instructions(self):
+        now = datetime(2026, 10, 5, 23, 14, tzinfo=timezone(timedelta(hours=2)))
+        text = conversation.setup_message({'model': 'm', 'instructions': 'Hi.'}, now)['setup']['systemInstruction']['parts'][0]['text']
+        self.assertEqual(text, 'Hi. Current local date and time at the start of this conversation: '
+                               'Monday, 05 October 2026, 23:14 (UTC+0200).')
 
 
 class DownsamplerTests(unittest.TestCase):

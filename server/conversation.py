@@ -82,14 +82,17 @@ async def health(request):
     return web.json_response({'status': 'ok', 'gemini_configured': bool(request.app[CONFIG]['gemini_key'])})
 
 
-def setup_message(config):
+def setup_message(config, now=None):
+    # Gemini has no clock: give it the Pi's local date and time at session start.
+    now = now or datetime.now().astimezone()
+    clock = now.strftime(' Current local date and time at the start of this conversation: %A, %d %B %Y, %H:%M (UTC%z).')
     generation = {'responseModalities': ['AUDIO']}
     if config.get('voice'):
         generation['speechConfig'] = {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': config['voice']}}}
     return {'setup': {
         'model': 'models/' + config['model'].removeprefix('models/'),
         'generationConfig': generation,
-        'systemInstruction': {'parts': [{'text': config['instructions']}]},
+        'systemInstruction': {'parts': [{'text': config['instructions'] + clock}]},
         'inputAudioTranscription': {},
         'outputAudioTranscription': {},
         'contextWindowCompression': {'slidingWindow': {}},
