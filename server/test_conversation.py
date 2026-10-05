@@ -85,6 +85,11 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await ws.receive(timeout=2)).data, b'\x00' * 4)
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'transcript')
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'turn_complete')
+        big = base64.b64encode(b'\x00' * 30000).decode()  # 20000 bytes after 3:2 resampling
+        await self.provider.send_json({'serverContent': {'modelTurn': {'parts': [
+            {'inlineData': {'mimeType': 'audio/pcm;rate=24000', 'data': big}}]}}})
+        frames = [len((await ws.receive(timeout=2)).data) for _ in range(5)]
+        self.assertEqual(frames, [4096] * 4 + [20000 - 4 * 4096])
         await self.provider.send_json({'serverContent': {'interrupted': True}})
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'interrupted')
         await ws.close()

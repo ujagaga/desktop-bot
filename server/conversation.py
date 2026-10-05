@@ -20,6 +20,8 @@ MAX_MESSAGE = 2 * 1024 * 1024
 logger = logging.getLogger(__name__)
 # Gemini replies at 24 kHz; the robot's mic and speaker share one 16 kHz I2S clock.
 OUTPUT_SAMPLE_RATE = 16000
+# The ESP32 WebSocket client rejects frames above 15 KB; Gemini chunks reach about 19 KB.
+DEVICE_FRAME_BYTES = 4096
 CONFIG = web.AppKey('settings', dict)
 GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
@@ -162,8 +164,8 @@ async def gemini_messages(device, upstream):
                 inline = part.get('inlineData', {})
                 if inline.get('mimeType', '').startswith('audio/pcm'):
                     pcm = downsampler.process(base64.b64decode(inline['data']))
-                    if pcm:
-                        await device.send_bytes(pcm)
+                    for start in range(0, len(pcm), DEVICE_FRAME_BYTES):
+                        await device.send_bytes(pcm[start:start + DEVICE_FRAME_BYTES])
         for field, role in [('inputTranscription', 'user'), ('outputTranscription', 'assistant')]:
             if content.get(field, {}).get('text'):
                 await device.send_json({'type': 'transcript', 'role': role, 'text': content[field]['text']})
