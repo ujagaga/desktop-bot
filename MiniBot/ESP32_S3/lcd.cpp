@@ -179,6 +179,15 @@ void LCD_ShowText(const char *text) {
   if (text != nullptr) tft.print(text);
 }
 
+void LCD_ShowFooter(const char *text) {
+  int16_t width = strlen(text) * 12;
+  tft.setTextWrap(false);
+  tft.setTextSize(2);
+  tft.setTextColor(foregroundColor, backgroundColor);
+  tft.setCursor(max(0, (tft.width() - width) / 2), tft.height() - 18);
+  tft.print(text);
+}
+
 void LCD_ShowTime(const char *timeText, const char *dateText) {
   statusDirty = true;
   lastTime = timeText ? timeText : "";

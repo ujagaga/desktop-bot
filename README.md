@@ -234,7 +234,10 @@ want to enroll.
 The separate gateway on port 8041 connects an ESP32 microphone and speaker to
 Gemini Live, with optional face-recognition context. See [GEMINI.md](GEMINI.md)
 for API-key configuration, installation, the WebSocket protocol, and a smoke test.
-The installer also manages `face-conversation.service`.
+The installer also manages `face-conversation.service`. Optional `GEMINI_VOICE`
+selects a prebuilt Gemini voice; `GET /voice` lists voices and the current one,
+and `POST /voice` with `{"voice": "<name>"}` (or `""` for the default) saves a
+choice in `server/voice.json` that overrides it. Both require `X-API-Key`.
 
 ## HTTP API
 

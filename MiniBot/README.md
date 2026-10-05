@@ -130,17 +130,22 @@ reports the reason. Wake word detection is paused during a session.
 voice
 voice url <wss://host[:port]/path>
 voice key <api-key>
+voice name [<voice>|default]
 voice start
 voice stop
 ```
 
-- `voice` prints the state, URL, whether a key is set, the session count, audio
+- `voice` prints the state, URL, whether a key is set, the last health check
+  result and HTTP code, the session count, audio
   seconds sent and received, dropped reply bytes, and the last error.
 - `voice url` and `voice key` save the gateway URL and the device API key
   (`API_KEY` in the Pi's `server/appsettings.py`) in Preferences
   (`miniBotVoice`). Without a saved URL, `VOICE_DEFAULT_URL` from
   `ESP32_S3/config.h` is used; there is no key fallback. The key is never printed. Do not compile it into the
   firmware: the repository and OTA binaries are public.
+- `voice name` prints the gateway's current Gemini voice and the 30 choices;
+  `voice name <voice>` (any letter case) or `voice name default` saves it on the
+  Pi (`server/voice.json`, overriding `GEMINI_VOICE`) for all new sessions.
 - `voice start` opens a session without the wake word; `voice stop` ends it.
 
 ## Tap sleep and wake
@@ -422,8 +427,15 @@ off. Sleep does not erase saved credentials.
 
 ## Firmware behavior
 
-- Battery status is sampled and refreshed approximately every two seconds in normal status mode.
-- Custom text and face screens suppress automatic battery status redraws.
+- After boot and after waking from sleep, the live status screen shows until two
+  seconds after the S3 has a Wi-Fi IP address (immediately if Wi-Fi is turned off).
+- Then face 00 (neutral) shows. While a problem lasts, face 02 (sad) shows instead,
+  with one line below it: `LOW BATTERY <V>` (below 15%, clears at 20% or when
+  charging), `NO WI-FI` (Wi-Fi enabled but disconnected), or `NO SERVER` (the
+  gateway `/health` check, run every 60 s, fails or reports Gemini unconfigured).
+  The screen is redrawn only when this state changes, so `lcd text`, `lcd face`, and
+  `lcd status` content stays until the next change.
+- The status screen refreshes about every two seconds while visible.
 - `lcd status` returns the display to the live battery and Wi-Fi status screen.
 - The LCD, gyro, and face renderer are separated into dedicated modules.
 
@@ -564,7 +576,8 @@ client need one initial USB upload using `tools/build_s3.sh upload`.
 - `ESP32_S3/audio.cpp`: I2S microphone/speaker, shared with the wake word task
 - `ESP32_S3/wake_word.cpp`: microWakeWord listener task
 - `ESP32_S3/wake_word_model.h`: embedded `hey_jarvis` model
-- `ESP32_S3/voice.cpp`: Gemini gateway WebSocket session, chime, and reply playback
+- `ESP32_S3/voice.cpp`: Gemini gateway WebSocket session, chime, reply playback, and health check
+- `ESP32_S3/screen.cpp`: status screen, idle face, and error display policy
 - `libraries/microfrontend/`: TFLite Micro audio frontend library
 - `ESP32_S3/motor.cpp`: timed motor control
 - `ESP32_S3/wifi_connection.cpp`: stored Wi-Fi credentials and connection management

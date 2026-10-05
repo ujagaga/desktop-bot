@@ -1,6 +1,8 @@
 #include "voice.h"
 
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
+#include <NetworkClientSecure.h>
 #include <Preferences.h>
 #include <WebSocketsClient.h>
 #include <WiFi.h>
@@ -11,8 +13,7 @@
 #include "audio.h"
 #include "config.h"
 #include "faces.h"
-#include "battery.h"
-#include "lcd.h"
+#include "screen.h"
 #include "wake_word.h"
 
 // Root certificate bundle supplied by the installed ESP32 Arduino core.
@@ -31,6 +32,7 @@ constexpr unsigned long MAX_SESSION_MS = 180000;
 constexpr unsigned long ECHO_TAIL_MS = 300;
 constexpr float CHIME_AMPLITUDE = 3000.0f;  // about -21 dBFS
 constexpr unsigned long ERROR_FACE_MS = 2000;
+constexpr unsigned long HEALTH_INTERVAL_MS = 60000;
 
 enum class State { Idle, Connecting, Active };
 const char *const STATE_NAMES[] = { "idle", "connecting", "active" };
@@ -49,6 +51,9 @@ unsigned long lastActivityMs = 0;
 bool audioSinceEnd = false;
 const char *lastError = "none";
 unsigned long errorFaceMs = 0;
+unsigned long lastHealthMs = 0;
+bool serverOk = true;  // until a health check says otherwise
+int healthCode = 0;
 uint32_t sessionCount = 0, sentBytes = 0, receivedBytes = 0, droppedBytes = 0;
 
 bool parseUrl(const String &value) {
@@ -131,9 +136,35 @@ void showResult(const char *error) {
     FACE_Show(2);  // 02_sad
     errorFaceMs = millis() | 1;
   } else {
-    LCD_Clear();
-    BATT_ShowStatus();
+    SCREEN_Refresh();
   }
+}
+
+// HTTP(S) request to another gateway endpoint on the same host, authenticated with the device key.
+struct GatewayRequest {
+  HTTPClient http;
+  NetworkClientSecure secureClient;
+  NetworkClient plainClient;
+
+  bool begin(const char *endpoint) {
+    String target = String(secure ? "https://" : "http://") + host + ":" + port + endpoint;
+    if (secure) secureClient.setCACertBundle(bundleStart, bundleEnd - bundleStart);
+    if (!(secure ? http.begin(secureClient, target) : http.begin(plainClient, target))) return false;
+    http.setTimeout(5000);
+    http.addHeader("X-API-Key", apiKey);
+    return true;
+  }
+};
+
+// GET /health on the gateway host; needs the device key and Gemini configured on the Pi.
+void checkHealth() {
+  lastHealthMs = millis();
+  GatewayRequest request;
+  if (!request.begin("/health")) return;
+  HTTPClient &http = request.http;
+  healthCode = http.GET();
+  serverOk = healthCode == 200 && http.getString().indexOf("\"gemini_configured\": true") >= 0;
+  http.end();
 }
 
 void endSession(const char *error) {
@@ -246,7 +277,13 @@ void VOICE_Process() {
     errorFaceMs = 0;
     if (state == State::Idle) showResult(nullptr);
   }
-  if (state == State::Idle) return;
+  if (state == State::Idle) {
+    if (host.length() && WiFi.status() == WL_CONNECTED &&
+        (!lastHealthMs || millis() - lastHealthMs > HEALTH_INTERVAL_MS)) {
+      checkHealth();
+    }
+    return;
+  }
   socket.loop();
   if (state == State::Idle) return;
 
@@ -294,7 +331,10 @@ bool VOICE_SetUrl(const char *value) {
   if (!prefs.begin("miniBotVoice", false)) return false;
   bool ok = prefs.putString("url", candidate) == candidate.length();
   prefs.end();
-  if (ok) url = candidate;
+  if (ok) {
+    url = candidate;
+    lastHealthMs = 0;
+  }
   return ok;
 }
 
@@ -305,13 +345,75 @@ bool VOICE_SetKey(const char *value) {
   if (!prefs.begin("miniBotVoice", false)) return false;
   bool ok = prefs.putString("key", candidate) == candidate.length();
   prefs.end();
-  if (ok) apiKey = candidate;
+  if (ok) {
+    apiKey = candidate;
+    lastHealthMs = 0;
+  }
   return ok;
 }
 
+bool VOICE_ServerVoice(Print &output, const char *name) {
+  if (!host.length() || !apiKey.length()) {
+    output.println("ERR voice url/key not set");
+    return false;
+  }
+  String body;
+  if (name) {
+    String chosen = strcasecmp(name, "default") == 0 ? "" : name;
+    for (char c : chosen) {
+      if (!isalpha((unsigned char)c)) {
+        output.println("ERR voice name must be letters only");
+        return false;
+      }
+    }
+    // Gateway names are capitalized (Kore, Puck, ...); accept any case here.
+    chosen.toLowerCase();
+    if (chosen.length()) chosen[0] = toupper(chosen[0]);
+    body = "{\"voice\":\"" + chosen + "\"}";
+  }
+  GatewayRequest request;
+  if (!request.begin("/voice")) {
+    output.println("ERR cannot reach gateway");
+    return false;
+  }
+  int code;
+  if (name) {
+    request.http.addHeader("Content-Type", "application/json");
+    code = request.http.POST(body);
+  } else {
+    code = request.http.GET();
+  }
+  JsonDocument doc;
+  bool parsed = code > 0 && !deserializeJson(doc, request.http.getString());
+  request.http.end();
+  if (!parsed || (code != 200 && code != 400)) {
+    output.printf("ERR gateway voice request failed (%d)\n", code);
+    return false;
+  }
+  if (code == 400) output.print("ERR unknown voice. ");
+  else output.printf("Server voice: %s\n", strlen(doc["voice"] | "") ? (const char *)doc["voice"] : "default");
+  output.print("Voices: default");
+  for (JsonVariant voice : doc["voices"].as<JsonArray>()) {
+    output.print(' ');
+    output.print(voice.as<const char *>());
+  }
+  output.println();
+  return code == 200;
+}
+
+bool VOICE_IsBusy() {
+  return state != State::Idle || errorFaceMs;
+}
+
+bool VOICE_ServerOk() {
+  return serverOk;
+}
+
 void VOICE_PrintStatus(Print &output) {
-  output.printf("VOICE state=%s url=%s key=%s sessions=%lu sent=%lus received=%lus dropped=%lu last_error=%s\n",
+  output.printf("VOICE state=%s url=%s key=%s server=%s(%d) sessions=%lu sent=%lus received=%lus dropped=%lu "
+                "last_error=%s\n",
                 STATE_NAMES[(int)state], url.length() ? url.c_str() : "(unset)", apiKey.length() ? "set" : "(unset)",
-                (unsigned long)sessionCount, (unsigned long)(sentBytes / BYTES_PER_SECOND),
-                (unsigned long)(receivedBytes / BYTES_PER_SECOND), (unsigned long)droppedBytes, lastError);
+                serverOk ? "ok" : "fail", healthCode, (unsigned long)sessionCount,
+                (unsigned long)(sentBytes / BYTES_PER_SECOND), (unsigned long)(receivedBytes / BYTES_PER_SECOND),
+                (unsigned long)droppedBytes, lastError);
 }

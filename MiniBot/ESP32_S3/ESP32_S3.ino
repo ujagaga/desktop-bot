@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "wake_word.h"
 #include "voice.h"
+#include "screen.h"
 #include "faces.h"
 #include <esp_ota_ops.h>
 
@@ -36,6 +37,7 @@ void setup() {
   WIFI_Init();
   MOTOR_Init();
   HTTP_SERVER_Init();
+  SCREEN_StartWake();
 }
 
 void loop() {
@@ -46,7 +48,7 @@ void loop() {
   }
   COMMS_Poll();
   CLOCK_Process();
-  BATT_process();
+  SCREEN_Process();
   MOTOR_Process();
   uint8_t taps = GYRO_PollTaps();
   if (taps) Serial.printf("GYRO: %u tap(s)\n", taps);

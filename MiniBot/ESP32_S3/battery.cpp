@@ -22,7 +22,6 @@
 #define BAT_VOLTAGE_MIN 3.3f
 #define BAT_VOLTAGE_MAX 4.2f
 
-uint32_t readTime = 0;
 
 float readBatteryVoltage() {
   const int samples = 8;
@@ -87,11 +86,4 @@ void BATT_ShowStatus() {
               (WiFi.status() == WL_CONNECTED) ? wifiLabel : nullptr,
               (WiFi.status() == WL_CONNECTED) ? ipLabel : nullptr,
               COMMS_GetCameraIP());
-}
-
-void BATT_process(){
-  if(millis() - readTime > 2000){
-    BATT_ShowStatus();
-    readTime = millis();
-  }
 }

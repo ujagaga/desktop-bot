@@ -12,6 +12,7 @@
 #include "battery.h"
 #include "wake_word.h"
 #include "voice.h"
+#include "screen.h"
 #include "wifi_connection.h"
 #include "clock.h"
 #include "lcd.h"
@@ -171,7 +172,8 @@ static bool cmdVoice(Print *output, const char *args) {
     output->println("ERR voice key <api-key>");
     return false;
   }
-  output->println("ERR voice [start|stop|url <url>|key <key>]");
+  if (strcasecmp(subcmd, "name") == 0) return VOICE_ServerVoice(*output, *value ? value : nullptr);
+  output->println("ERR voice [start|stop|url <url>|key <key>|name <voice>]");
   return false;
 }
 
@@ -252,7 +254,7 @@ static bool cmdSleep(Print *output, const char *args) {
   }
   wakeCamera();
   LCD_BacklightRestore();
-  LCD_Clear();
+  SCREEN_StartWake();
   CLOCK_ResetSync();
   WIFI_RestoreAfterSleep();
   if (!gyroRestored) {
@@ -635,7 +637,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt v");
   output->println("  batt chg");
   output->println("  ww");
-  output->println("  voice [start|stop|url <url>|key <key>]");
+  output->println("  voice [start|stop|url <url>|key <key>|name <voice>]");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
   output->println("  gyro tap sleep [1-3] (sleep at or above selected count)");
