@@ -21,3 +21,4 @@ faces
 
 server/.legacy-migrated
 *.FCBak
+server/voice.json

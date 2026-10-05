@@ -1,6 +1,8 @@
 """Gateway integration checks against local fake Gemini and recognition servers."""
 import asyncio
 import base64
+import os
+import tempfile
 import unittest
 
 import numpy as np
@@ -42,8 +44,11 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         await self.fake.start_server()
         self.config = {'api_key': 'device-secret', 'gemini_key': 'cloud-secret',
             'model': 'test-model', 'instructions': 'Test instructions', 'max_sessions': 1,
-            'recognize_url': str(self.fake.make_url('/recognize'))}
-        self.app = conversation.create_app(self.config, str(self.fake.make_url('/live')))
+            'recognize_url': str(self.fake.make_url('/recognize')), 'voice': ''}
+        self.voice_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.voice_dir.cleanup)
+        self.voice_file = os.path.join(self.voice_dir.name, 'voice.json')
+        self.app = conversation.create_app(self.config, str(self.fake.make_url('/live')), self.voice_file)
         self.client = TestClient(TestServer(self.app))
         await self.client.start_server()
         self.headers = {'X-API-Key': 'device-secret'}
@@ -102,16 +107,22 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(voice['voiceName'], 'Kore')
         await ws.close()
 
-    async def test_device_voice_request_is_validated(self):
-        ws = await self.client.ws_connect('/conversation?voice=Puck', headers=self.headers)
-        await ws.receive_json(timeout=2)
+    async def test_voice_endpoint_lists_validates_and_persists(self):
+        response = await self.client.get('/voice')
+        self.assertEqual(response.status, 401)
+        listed = await (await self.client.get('/voice', headers=self.headers)).json()
+        self.assertEqual(listed['voice'], '')
+        self.assertIn('Kore', listed['voices'])
+        response = await self.client.post('/voice', json={'voice': 'Bogus'}, headers=self.headers)
+        self.assertEqual(response.status, 400)
+        response = await self.client.post('/voice', json={'voice': 'Puck'}, headers=self.headers)
+        self.assertEqual((await response.json())['voice'], 'Puck')
+        ws = await self.connect()
         voice = self.setup['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']
         self.assertEqual(voice['voiceName'], 'Puck')
         await ws.close()
-        ws = await self.client.ws_connect('/conversation?voice=Bogus', headers=self.headers)
-        await ws.receive_json(timeout=2)
-        self.assertNotIn('speechConfig', self.setup['setup']['generationConfig'])
-        await ws.close()
+        reloaded = conversation.create_app(dict(self.config, voice=''), voice_file=self.voice_file)
+        self.assertEqual(reloaded[conversation.CONFIG]['voice'], 'Puck')
 
     async def test_snapshot_is_recognized_locally(self):
         ws = await self.connect()

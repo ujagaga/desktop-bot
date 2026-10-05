@@ -22,13 +22,14 @@ logger = logging.getLogger(__name__)
 OUTPUT_SAMPLE_RATE = 16000
 # The ESP32 WebSocket client rejects frames above 15 KB; Gemini chunks reach about 19 KB.
 DEVICE_FRAME_BYTES = 4096
-# Gemini Live prebuilt voices a device may request with ?voice=<name>.
+# Gemini Live prebuilt voices that /voice accepts.
 VOICES = frozenset('''Zephyr Puck Charon Kore Fenrir Leda Orus Aoede Callirrhoe Autonoe Enceladus Iapetus
     Umbriel Algieba Despina Erinome Algenib Rasalgethi Laomedeia Achernar Alnilam Schedar Gacrux
     Pulcherrima Achird Zubenelgenubi Vindemiatrix Sadachbia Sadaltager Sulafat'''.split())
 CONFIG = web.AppKey('settings', dict)
 GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
+VOICE_FILE = web.AppKey('voice_file', str)
 
 
 def settings():
@@ -205,9 +206,7 @@ async def conversation(request):
             async with http.ws_connect(request.app[GEMINI_ENDPOINT],
                 headers={'x-goog-api-key': config['gemini_key']}, heartbeat=30,
                 max_msg_size=4 * 1024 * 1024, timeout=aiohttp.ClientWSTimeout(ws_close=5)) as upstream:
-                requested = request.query.get('voice', '')
-                session_config = {**config, 'voice': requested} if requested in VOICES else config
-                await upstream.send_json(setup_message(session_config))
+                await upstream.send_json(setup_message(config))
                 # Gemini sends JSON in binary frames, including setupComplete.
                 first = await upstream.receive(timeout=20)
                 if (first.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY)
@@ -239,17 +238,44 @@ async def conversation(request):
     return device
 
 
+async def voice(request):
+    """GET: current voice and choices. POST {"voice": name or ""}: save it for new sessions."""
+    if not authorized(request):
+        return web.json_response({'error': 'invalid or missing API key'}, status=401)
+    config = request.app[CONFIG]
+    if request.method == 'POST':
+        try:
+            data = await request.json()
+        except ValueError:
+            data = None
+        chosen = data.get('voice') if isinstance(data, dict) else None
+        if chosen != '' and chosen not in VOICES:
+            return web.json_response({'error': 'Unknown voice.', 'voices': sorted(VOICES)}, status=400)
+        with open(request.app[VOICE_FILE], 'w') as f:
+            json.dump({'voice': chosen}, f)
+        config['voice'] = chosen
+    return web.json_response({'voice': config['voice'], 'voices': sorted(VOICES)})
+
+
 async def shutdown(app):
     await asyncio.gather(*(ws.close(code=1001, message=b'Server shutdown') for ws in list(app[SESSIONS])))
 
 
-def create_app(config=None, gemini_url=GEMINI_URL):
+def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None):
     app = web.Application(client_max_size=MAX_MESSAGE)
     app[CONFIG] = settings() if config is None else config
+    # A voice saved through /voice overrides GEMINI_VOICE.
+    app[VOICE_FILE] = voice_file or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'voice.json')
+    try:
+        with open(app[VOICE_FILE]) as f:
+            app[CONFIG]['voice'] = json.load(f)['voice']
+    except (OSError, ValueError, KeyError):
+        pass
     app[GEMINI_ENDPOINT] = gemini_url
     app[SESSIONS] = set()
     app.router.add_get('/health', health)
     app.router.add_get('/conversation', conversation)
+    app.router.add_route('*', '/voice', voice)
     app.on_shutdown.append(shutdown)
     return app
 
