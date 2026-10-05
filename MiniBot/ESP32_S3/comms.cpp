@@ -25,7 +25,7 @@
 #define GPIO_UART_RX 14
 #define GPIO_UART_TX 13
 #define MAX_LINE_LEN 128
-#define MOTOR_ROTATE_TIMEOUT_MS 15000UL
+#define MOTOR_ROTATE_TIMEOUT_MS 3000UL
 #define MOTOR_ROTATE_OVERSHOOT_DEGREES 2.0f
 #define MOTOR_AUTO_CALIBRATION_PWM_PERCENT 30
 #define MOTOR_AUTO_CALIBRATION_MAX_SECONDS 60UL
@@ -286,7 +286,7 @@ static bool cmdMotorRotate(Print *output, const char *args) {
 
     if (millis() - lastDebugMs >= 100) {
       lastDebugMs = millis();
-      Serial.printf("ROTATE dbg t=%lu delta=%.2f fix=%d reads=%lu avg=%luus max=%luus\n",
+      output->printf("ROTATE dbg t=%lu delta=%.2f fix=%d reads=%lu avg=%luus max=%luus\n",
                     millis() - startMs, deltaDegrees, correctingOvershoot, readCount,
                     readTotalUs / readCount, readMaxUs);
     }
