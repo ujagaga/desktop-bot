@@ -34,6 +34,7 @@ def settings():
         'model': getattr(appsettings, 'GEMINI_MODEL', 'gemini-3.1-flash-live-preview'),
         'recognize_url': getattr(appsettings, 'RECOGNIZE_URL', 'http://127.0.0.1:8040/recognize'),
         'max_sessions': getattr(appsettings, 'GEMINI_MAX_SESSIONS', 2),
+        'voice': getattr(appsettings, 'GEMINI_VOICE', ''),
         'instructions': getattr(appsettings, 'GEMINI_SYSTEM_INSTRUCTION',
             'You are a helpful desktop voice assistant. Keep spoken responses concise. '
             'Reply in the language the user speaks. Camera observations are uncertain and '
@@ -77,9 +78,12 @@ async def health(request):
 
 
 def setup_message(config):
+    generation = {'responseModalities': ['AUDIO']}
+    if config.get('voice'):
+        generation['speechConfig'] = {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': config['voice']}}}
     return {'setup': {
         'model': 'models/' + config['model'].removeprefix('models/'),
-        'generationConfig': {'responseModalities': ['AUDIO']},
+        'generationConfig': generation,
         'systemInstruction': {'parts': [{'text': config['instructions']}]},
         'inputAudioTranscription': {},
         'outputAudioTranscription': {},

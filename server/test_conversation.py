@@ -72,6 +72,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
     async def test_audio_text_and_provider_events(self):
         ws = await self.connect()
         self.assertEqual(self.setup['setup']['model'], 'models/test-model')
+        self.assertNotIn('speechConfig', self.setup['setup']['generationConfig'])
         await ws.send_bytes(b'\x01\x00' * 320)
         data = await asyncio.wait_for(self.messages.get(), 2)
         self.assertEqual(base64.b64decode(data['realtimeInput']['audio']['data']), b'\x01\x00' * 320)
@@ -92,6 +93,13 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(frames, [4096] * 4 + [20000 - 4 * 4096])
         await self.provider.send_json({'serverContent': {'interrupted': True}})
         self.assertEqual((await ws.receive_json(timeout=2))['type'], 'interrupted')
+        await ws.close()
+
+    async def test_configured_voice_is_sent(self):
+        self.config['voice'] = 'Kore'
+        ws = await self.connect()
+        voice = self.setup['setup']['generationConfig']['speechConfig']['voiceConfig']['prebuiltVoiceConfig']
+        self.assertEqual(voice['voiceName'], 'Kore')
         await ws.close()
 
     async def test_snapshot_is_recognized_locally(self):
