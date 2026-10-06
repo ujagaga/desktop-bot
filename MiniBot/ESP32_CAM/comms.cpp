@@ -7,6 +7,7 @@
 #include "camera.h"
 #include "http_server.h"
 #include "http_client.h"
+#include "gateway.h"
 #include <strings.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -82,6 +83,14 @@ static bool parseIP(const char *line, uint32_t &address) {
 static bool dispatchCommand(const char *line) {
   // S3 help entries are indented text, including "sleep", not requests.
   if (*line == ' ' || *line == '\t') return false;
+  if (!strncasecmp(line, "snapshot ", 9)) {
+    const char *reply = GATEWAY_requestSnapshot(line + 9) ? "OK" : "ERR snapshot <session>";
+    Serial.println(reply);
+    consoleAppend("\n[reply] ");
+    consoleAppend(reply);
+    consoleAppend("\n");
+    return true;
+  }
   char command[16], argument[16], addressText[16], extra[2];
   int fields = sscanf(line, "%15s %15s %15s %1s", command, argument, addressText, extra);
   if (fields < 1) return false;

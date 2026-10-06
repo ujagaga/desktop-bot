@@ -9,6 +9,7 @@
 #include "camera.h"
 #include "comms.h"
 #include "config.h"
+#include "gateway.h"
 #include "http_client.h"
 #include "logger.h"
 #include "wifi_connection.h"
@@ -185,6 +186,23 @@ static esp_err_t wifiHandler(httpd_req_t *req) {
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid Wi-Fi settings or save failed");
   return text(req, "OK saved; reconnect using the new station address or setup AP");
 }
+static esp_err_t gatewayHandler(httpd_req_t *req) {
+  if (req->method == HTTP_GET) return json(req, GATEWAY_status());
+  if (!req->content_len || req->content_len > 512)
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected JSON body up to 512 bytes");
+  char body[513]; size_t received = 0;
+  while (received < req->content_len) {
+    int n = httpd_req_recv(req, body + received, req->content_len - received);
+    if (n <= 0) return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Incomplete request body");
+    received += n;
+  }
+  JsonDocument doc;
+  if (deserializeJson(doc, body, received) || !doc["url"].is<String>() || !doc["key"].is<String>())
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Expected url and key strings");
+  if (!GATEWAY_configure(doc["url"].as<String>(), doc["key"].as<String>()))
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid gateway settings or save failed");
+  return text(req, "OK gateway settings saved");
+}
 static esp_err_t otaHandler(httpd_req_t *req) {
   if (!HTTPC_requestCheck()) {
     httpd_resp_set_status(req, "409 Conflict"); return text(req, "OTA requires station Wi-Fi; check may already be queued or busy");
@@ -211,7 +229,7 @@ void HTTPSRV_init() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.open_fn = clientOpened;
   config.close_fn = clientClosed;
-  config.max_uri_handlers = 12; config.stack_size = 8192;
+  config.max_uri_handlers = 14; config.stack_size = 8192;
   config.recv_wait_timeout = 3; config.send_wait_timeout = 3;
   config.lru_purge_enable = true;
   if (httpd_start(&commands, &config) == ESP_OK) {
@@ -227,6 +245,8 @@ void HTTPSRV_init() {
     route(commands, "/api/wifi", HTTP_GET, wifiHandler);
     route(commands, "/api/wifi", HTTP_POST, wifiHandler);
     route(commands, "/api/ota", HTTP_POST, otaHandler);
+    route(commands, "/api/gateway", HTTP_GET, gatewayHandler);
+    route(commands, "/api/gateway", HTTP_POST, gatewayHandler);
   } else LOG_append("ERR HTTP server startup failed");
   config.server_port = 81; config.ctrl_port += 1; config.stack_size = 4096;
   if (httpd_start(&stream, &config) == ESP_OK) route(stream, "/stream", HTTP_GET, streamHandler);

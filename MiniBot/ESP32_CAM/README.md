@@ -147,6 +147,17 @@ API documentation page.
 | GET | `/api/wifi` | Wi-Fi mode, configured SSID and addresses; no password |
 | POST | `/api/wifi` | Save/apply JSON Wi-Fi configuration |
 | POST | `/api/ota` | Queue a GitHub firmware check; empty body |
+| GET | `/api/gateway` | Voice gateway URL and whether an API key is saved; never the key |
+| POST | `/api/gateway` | Save JSON `{"url", "key"}`; an empty key keeps the saved one |
+
+### Voice gateway snapshots
+
+Set the gateway base URL (for example `https://face.ujagaga.in.rs`) and the
+device API key in the **Voice gateway** section of the UI; they are saved in
+Preferences (`camGateway`). When a voice session starts, the S3 sends
+`snapshot <session>` over UART; CAM replies `OK` (or `ERR snapshot <session>`),
+then its main loop captures one frame and POSTs it to `<url>/snapshot?session=<id>`
+for face recognition. The result is logged as `Gateway: snapshot ... HTTP <status>`.
 
 Wi-Fi POST example:
 

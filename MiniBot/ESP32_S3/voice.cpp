@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "audio.h"
+#include "comms.h"
 #include "config.h"
 #include "faces.h"
 #include "lcd.h"
@@ -202,6 +203,7 @@ void handleText(const uint8_t *payload, size_t length) {
   if (strcmp(type, "ready") == 0) {
     state = State::Active;
     lastActivityMs = millis();
+    if (doc["session"].is<const char *>()) COMMS_RequestCameraSnapshot(doc["session"]);
   } else if (strcmp(type, "transcript") == 0) {
     if (strcmp(doc["role"] | "", "user") == 0) lastActivityMs = millis();
     Serial.printf("VOICE %s: %s\n", (const char *)(doc["role"] | ""), (const char *)(doc["text"] | ""));

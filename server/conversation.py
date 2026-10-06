@@ -9,6 +9,7 @@ import importlib.util
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 from hmac import compare_digest
 
@@ -33,6 +34,8 @@ GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
 VOICE_FILE = web.AppKey('voice_file', str)
 COMMANDS = web.AppKey('commands', dict)
+# Session id -> (device, upstream, http) so the robot's camera can POST /snapshot into it.
+SNAPSHOT_TARGETS = web.AppKey('snapshot_targets', dict)
 
 
 def settings():
@@ -145,6 +148,28 @@ async def run_command(commands, call, device):
         return {'error': 'Command failed.'}
 
 
+async def observe(jpeg, device, upstream, http, config):
+    """Recognize faces in a JPEG and tell the device and Gemini who is present."""
+    if not jpeg or len(jpeg) > 1024 * 1024:
+        raise ValueError('JPEG must contain 1 byte to 1 MB.')
+    try:
+        async with http.post(config['recognize_url'], data=jpeg,
+            headers={'X-API-Key': config['api_key'], 'Content-Type': 'image/jpeg'},
+            timeout=aiohttp.ClientTimeout(total=15)) as response:
+            if response.status != 200:
+                raise ValueError('Face recognition failed; try another snapshot.')
+            result = await response.json()
+    except (aiohttp.ClientError, asyncio.TimeoutError):
+        raise ValueError('Face recognition server is unavailable.') from None
+    # Never forward arbitrary client-provided identity claims to the model.
+    names = result.get('names', [])
+    await device.send_json({'type': 'recognition', 'faces': result.get('faces', []), 'names': names})
+    await upstream.send_json({'realtimeInput': {'text':
+        'New camera observation (replaces previous observation; not speaker identification): '
+        + json.dumps({'observed_at': datetime.now(timezone.utc).isoformat(), 'people_present': names})}})
+    return names
+
+
 async def device_messages(device, upstream, http, config):
     async for message in device:
         if message.type == aiohttp.WSMsgType.BINARY:
@@ -179,23 +204,7 @@ async def device_messages(device, upstream, http, config):
                         jpeg = base64.b64decode(encoded, validate=True)
                     except (ValueError, binascii.Error):
                         raise ValueError('Invalid base64 JPEG.') from None
-                    if not jpeg or len(jpeg) > 1024 * 1024:
-                        raise ValueError('JPEG must contain 1 byte to 1 MB.')
-                    try:
-                        async with http.post(config['recognize_url'], data=jpeg,
-                            headers={'X-API-Key': config['api_key'], 'Content-Type': 'image/jpeg'},
-                            timeout=aiohttp.ClientTimeout(total=15)) as response:
-                            if response.status != 200:
-                                raise ValueError('Face recognition failed; try another snapshot.')
-                            result = await response.json()
-                    except (aiohttp.ClientError, asyncio.TimeoutError):
-                        raise ValueError('Face recognition server is unavailable.') from None
-                    # Never forward arbitrary client-provided identity claims to the model.
-                    names = result.get('names', [])
-                    await device.send_json({'type': 'recognition', 'faces': result.get('faces', []), 'names': names})
-                    await upstream.send_json({'realtimeInput': {'text':
-                        'New camera observation (replaces previous observation; not speaker identification): '
-                        + json.dumps({'observed_at': datetime.now(timezone.utc).isoformat(), 'people_present': names})}})
+                    await observe(jpeg, device, upstream, http, config)
                 elif kind == 'stop':
                     return
                 else:
@@ -265,7 +274,9 @@ async def conversation(request):
                 if (first.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY)
                         or 'setupComplete' not in json.loads(first.data)):
                     raise RuntimeError('Gemini setup failed.')
-                await device.send_json({'type': 'ready', 'input_audio': 'pcm_s16le',
+                session = secrets.token_hex(8)
+                request.app[SNAPSHOT_TARGETS][session] = (device, upstream, http)
+                await device.send_json({'type': 'ready', 'input_audio': 'pcm_s16le', 'session': session,
                     'input_sample_rate': 16000, 'output_sample_rate': OUTPUT_SAMPLE_RATE, 'channels': 1})
                 tasks = [asyncio.create_task(device_messages(device, upstream, http, config)),
                          asyncio.create_task(gemini_messages(device, upstream, request.app[COMMANDS]))]
@@ -287,6 +298,9 @@ async def conversation(request):
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         sessions.discard(device)
+        for session, target in list(request.app[SNAPSHOT_TARGETS].items()):
+            if target[0] is device:
+                del request.app[SNAPSHOT_TARGETS][session]
         await device.close()
     return device
 
@@ -310,6 +324,20 @@ async def voice(request):
     return web.json_response({'voice': config['voice'], 'voices': sorted(VOICES)})
 
 
+async def snapshot(request):
+    """POST /snapshot?session=<id> with a raw JPEG, e.g. from the robot's camera."""
+    if not authorized(request):
+        return web.json_response({'error': 'invalid or missing API key'}, status=401)
+    target = request.app[SNAPSHOT_TARGETS].get(request.query.get('session', ''))
+    if not target:
+        return web.json_response({'error': 'Unknown or ended session.'}, status=404)
+    try:
+        names = await observe(await request.read(), *target, request.app[CONFIG])
+    except ValueError as error:
+        return web.json_response({'error': str(error)}, status=400)
+    return web.json_response({'names': names})
+
+
 async def shutdown(app):
     await asyncio.gather(*(ws.close(code=1001, message=b'Server shutdown') for ws in list(app[SESSIONS])))
 
@@ -327,9 +355,11 @@ def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None, commands_dir
     app[COMMANDS] = load_commands(commands_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'commands'))
     app[GEMINI_ENDPOINT] = gemini_url
     app[SESSIONS] = set()
+    app[SNAPSHOT_TARGETS] = {}
     app.router.add_get('/health', health)
     app.router.add_get('/conversation', conversation)
     app.router.add_route('*', '/voice', voice)
+    app.router.add_post('/snapshot', snapshot)
     app.on_shutdown.append(shutdown)
     return app
 

@@ -24,14 +24,14 @@ button{cursor:pointer}button:disabled{opacity:.5;cursor:wait}section,details{bac
 #camera-settings label.inactive{opacity:.45}
 @media(max-width:900px){.camera-row{grid-template-columns:1fr;gap:12px}}
 pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{min-height:1.5em;color:#67d5ec}summary{cursor:pointer;font-size:1.2em}
-#wifi-form{display:grid;gap:12px;max-width:620px}
+#wifi-form,#gateway-form{display:grid;gap:12px;max-width:620px}
 #serial-form{display:flex;gap:8px}#serial-command{flex:1;min-width:0}
 #serial-output{height:260px;background:#111820;padding:12px;overflow-wrap:anywhere}
-#wifi-form label{display:grid;grid-template-columns:100px minmax(0,1fr);align-items:center;gap:16px;min-width:0}
-#wifi-form input,#wifi-form select{box-sizing:border-box;width:100%;min-width:0;margin:0}
-#wifi-form p{margin:0 0 0 116px;line-height:1.5;color:#bac5d1}
-#wifi-form button{justify-self:start;margin:0 0 0 116px}
-@media(max-width:480px){#wifi-form label{grid-template-columns:1fr;gap:6px}#wifi-form p,#wifi-form button{margin-left:0}}
+#wifi-form label,#gateway-form label{display:grid;grid-template-columns:100px minmax(0,1fr);align-items:center;gap:16px;min-width:0}
+#wifi-form input,#wifi-form select,#gateway-form input,#gateway-form select{box-sizing:border-box;width:100%;min-width:0;margin:0}
+#wifi-form p,#gateway-form p{margin:0 0 0 116px;line-height:1.5;color:#bac5d1}
+#wifi-form button,#gateway-form button{justify-self:start;margin:0 0 0 116px}
+@media(max-width:480px){#wifi-form label,#gateway-form label{grid-template-columns:1fr;gap:6px}#wifi-form p,#wifi-form button,#gateway-form p,#gateway-form button{margin-left:0}}
 </style></head><body>
 <h1>MiniBot CAM <small id="info"></small></h1>
 <p><a href="/capture" target="_blank">Snapshot</a></p>
@@ -51,6 +51,11 @@ pre{white-space:pre-wrap;overflow:auto;max-height:320px;font-size:13px}#message{
 <label>SSID <input id="wifi-ssid" maxlength="32" autocomplete="off"></label>
 <label>Password <input id="wifi-pass" type="password" maxlength="63" autocomplete="new-password"></label>
 <button type="submit">Save Wi-Fi settings</button></form></section>
+<section><h2>Voice gateway</h2><p id="gateway-status"></p>
+<form id="gateway-form"><label>URL <input id="gateway-url" maxlength="200" placeholder="https://face.ujagaga.in.rs" autocomplete="off"></label>
+<label>API key <input id="gateway-key" type="password" maxlength="128" autocomplete="new-password"></label>
+<p>The S3 asks for a snapshot at the start of each voice session; it is sent to URL/snapshot for face recognition. Leave the key empty to keep the saved one.</p>
+<button type="submit">Save gateway settings</button></form></section>
 <details id="serial-console"><summary>S3 serial console</summary>
 <p>Send commands to the S3 over UART. Try <code>help</code>, <code>wifi ip</code> or <code>batt v</code>. Up/Down recalls the last 10 commands.</p>
 <pre id="serial-output" role="log" aria-live="polite"></pre>
@@ -261,6 +266,14 @@ $('wifi-form').onsubmit=async event=>{
   try{message(await request('/api/wifi',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:$('wifi-mode').value,ssid:$('wifi-ssid').value,password:$('wifi-pass').value})}));$('wifi-pass').value='';}
   catch(e){message(e.message);}
 };
+$('gateway-form').onsubmit=async event=>{
+  event.preventDefault();
+  try{message(await request('/api/gateway',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('gateway-url').value,key:$('gateway-key').value})}));$('gateway-key').value='';loadGateway();}
+  catch(e){message(e.message);}
+};
+async function loadGateway(){try{const state=JSON.parse(await request('/api/gateway'));
+  $('gateway-url').value=state.url;$('gateway-status').textContent=state.key_set?'API key saved':'API key not set';
+}catch(e){message(e.message);}}
 function showWifi(state){$('wifi-status').textContent=(state.connected?'Connected at '+state.ip:'Setup AP '+state.ap_ssid+' at '+state.ap_ip)+' · S3 Wi-Fi IP: '+(state.s3_ip||'Waiting for UART response…');}
 async function loadWifi(){try{const state=JSON.parse(await request('/api/wifi'));
   $('wifi-mode').value=state.mode;$('wifi-ssid').value=state.ssid;
@@ -275,5 +288,5 @@ async function poll(){
   }catch(e){offline=true;}
   setTimeout(poll,2000);
 }
-checkFirmwareStatus();loadCamera();loadWifi();poll();
+checkFirmwareStatus();loadCamera();loadWifi();loadGateway();poll();
 </script></body></html>)HTML";

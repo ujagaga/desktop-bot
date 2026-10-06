@@ -239,6 +239,10 @@ selects a prebuilt Gemini voice; `GET /voice` lists voices and the current one,
 and `POST /voice` with `{"voice": "<name>"}` (or `""` for the default) saves a
 choice in `server/voice.json` that overrides it. Both require `X-API-Key`.
 
+The `ready` message carries a `session` id; `POST /snapshot?session=<id>` with
+`X-API-Key` and a raw JPEG body (the robot's camera uses it) runs face recognition
+and tells that session's Gemini who is present, like a WebSocket `snapshot`.
+
 Each `server/commands/<name>.py` with a `DESCRIPTION` string and a `run()`
 function returning text becomes a Gemini tool named `<name>`. When a request
 fits the description, Gemini calls it, the gateway runs `run()` (10 s limit), and

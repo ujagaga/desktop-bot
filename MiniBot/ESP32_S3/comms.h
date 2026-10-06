@@ -16,5 +16,7 @@ void COMMS_Execute(const char *command, Print &output);
 
 // Cached CAM station address, empty until discovered. Read from loop context.
 const char *COMMS_GetCameraIP();
+// Ask the CAM to POST one frame to the voice gateway's /snapshot for this session.
+void COMMS_RequestCameraSnapshot(const char *session);
 
 #endif

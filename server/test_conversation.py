@@ -160,6 +160,21 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('video', upstream['realtimeInput'])
         await ws.close()
 
+    async def test_snapshot_post_reaches_session(self):
+        ws = await self.client.ws_connect('/conversation', headers=self.headers)
+        session = (await ws.receive_json(timeout=2))['session']
+        response = await self.client.post('/snapshot?session=' + session, data=b'jpeg')
+        self.assertEqual(response.status, 401)
+        response = await self.client.post('/snapshot?session=wrong', data=b'jpeg', headers=self.headers)
+        self.assertEqual(response.status, 404)
+        response = await self.client.post('/snapshot?session=' + session, data=b'jpeg', headers=self.headers)
+        self.assertEqual((await response.json())['names'], ['Alice'])
+        self.assertEqual((await ws.receive_json(timeout=2))['names'], ['Alice'])
+        self.assertIn('Alice', (await asyncio.wait_for(self.messages.get(), 2))['realtimeInput']['text'])
+        await ws.close()
+        await asyncio.sleep(0.1)
+        self.assertEqual(self.app[conversation.SNAPSHOT_TARGETS], {})
+
     async def test_invalid_messages_capacity_and_stop(self):
         ws = await self.connect()
         response = await self.client.get('/conversation', headers=self.headers)

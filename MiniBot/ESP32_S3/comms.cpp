@@ -80,6 +80,12 @@ static void wakeCamera() {
 
 const char *COMMS_GetCameraIP() { return cameraIP; }
 
+void COMMS_RequestCameraSnapshot(const char *session) {
+  if (!cameraIP[0]) return;  // CAM not discovered (or asleep)
+  Serial2.print("snapshot ");
+  Serial2.println(session);
+}
+
 // GPIO UART is bidirectional: replies must not enter the command dispatcher.
 static bool consumeCameraReply(const char *line) {
   if (!strcmp(line, "CAM SLEEP READY")) {

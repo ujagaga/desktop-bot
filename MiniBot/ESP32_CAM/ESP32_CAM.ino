@@ -1,6 +1,7 @@
 #include <esp_log.h>
 #include "camera.h"
 #include "comms.h"
+#include "gateway.h"
 #include "http_client.h"
 #include "http_server.h"
 #include "logger.h"
@@ -14,6 +15,7 @@ void setup() {
   COMMS_Init();
   CAM_Init();
   HTTPC_init();
+  GATEWAY_init();
   WIFIC_init();
   HTTPSRV_init();
 }
@@ -21,5 +23,6 @@ void loop() {
   COMMS_ProcessSleep();
   WIFIC_process();
   HTTPC_process();
+  GATEWAY_process();
   delay(50);
 }

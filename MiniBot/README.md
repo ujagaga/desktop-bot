@@ -153,6 +153,10 @@ the robot shows face N (0–15) with the text as a footer (about 20 characters),
 screen without a face; `"clock":"14:32"` instead shows big time text. It stays until the session
 ends, or exactly S seconds (max 600) when given; then the normal screen (neutral face) returns.
 
+When a session is ready, the S3 sends `snapshot <session>` to a discovered CAM, which POSTs one
+frame to the gateway's `/snapshot` so Gemini knows who is present (see the CAM README for its
+gateway settings).
+
 ## Tap sleep and wake
 
 GPIO7 capacitive touch support and its commands have been removed. The IMU
