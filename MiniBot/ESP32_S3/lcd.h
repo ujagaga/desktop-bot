@@ -34,7 +34,7 @@ void LCD_ShowText(const char *text);
 // One centered size-2 line in the 19 px strip below a face (faces are 240x202).
 void LCD_ShowFooter(const char *text);
 
-// Shows a local time and weekday/date screen.
+// Shows a local time and weekday/date screen; an empty date shows the time alone, larger and centered.
 void LCD_ShowTime(const char *timeText, const char *dateText);
 
 // Clear the display for OTA and suppress normal status refreshes.

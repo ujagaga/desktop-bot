@@ -199,6 +199,13 @@ void LCD_ShowTime(const char *timeText, const char *dateText) {
   tft.fillScreen(backgroundColor);
   tft.setTextColor(foregroundColor);
 
+  if (!*dateText) {
+    // Time only: size 8 is the largest that fits HH:MM (6 px glyph cells) in 240 px.
+    tft.setTextSize(8);
+    tft.setCursor((tft.width() - (int16_t)strlen(timeText) * 48) / 2, (tft.height() - 64) / 2);
+    tft.print(timeText);
+    return;
+  }
   tft.setTextSize(5);
   tft.setCursor(30, 62);
   if (timeText != nullptr) tft.print(timeText);
