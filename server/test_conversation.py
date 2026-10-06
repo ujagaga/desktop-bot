@@ -52,7 +52,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         with open(os.path.join(self.voice_dir.name, 'hello.py'), 'w') as f:
             f.write("DESCRIPTION = 'Greeting'\ndef run():\n    return 'Hi there'\n")
         with open(os.path.join(self.voice_dir.name, 'show.py'), 'w') as f:
-            f.write("DESCRIPTION = 'Shows'\ndef run():\n    return {'say': '14:32', 'clock': '14:32', 'seconds': 5}\n")
+            f.write("DESCRIPTION = 'Shows'\ndef run():\n    return {'say': '14:32', 'clock': '14:32', 'seconds': 5, 'sleep': True}\n")
         with open(os.path.join(self.voice_dir.name, 'broken.py'), 'w') as f:
             f.write("DESCRIPTION = 'Fails'\ndef run():\n    raise OSError('secret')\n")
         self.app = conversation.create_app(self.config, str(self.fake.make_url('/live')), self.voice_file,
@@ -137,7 +137,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
     async def test_commands_are_declared_and_run(self):
         ws = await self.connect()
         declared = self.setup['setup']['tools'][0]['functionDeclarations']
-        self.assertEqual([d['name'] for d in declared], ['broken', 'hello', 'show'])
+        self.assertEqual([d['name'] for d in declared], ['people_present', 'broken', 'hello', 'show'])
         await self.provider.send_json({'toolCall': {'functionCalls': [
             {'id': '1', 'name': 'hello', 'args': {}}, {'id': '2', 'name': 'broken'}, {'id': '3', 'name': 'nope'}]}})
         responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
@@ -147,6 +147,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             {'id': '3', 'name': 'nope', 'response': {'error': 'Unknown command.'}}])
         await self.provider.send_json({'toolCall': {'functionCalls': [{'id': '4', 'name': 'show'}]}})
         self.assertEqual(await ws.receive_json(timeout=2), {'type': 'display', 'clock': '14:32', 'seconds': 5})
+        self.assertEqual(await ws.receive_json(timeout=2), {'type': 'sleep'})
         responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
         self.assertEqual(responses[0]['response'], {'result': '14:32'})
         await ws.close()
@@ -155,9 +156,10 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         ws = await self.connect()
         await ws.send_json({'type': 'snapshot', 'jpeg': base64.b64encode(b'jpeg').decode()})
         self.assertEqual((await ws.receive_json(timeout=2))['names'], ['Alice'])
-        upstream = await asyncio.wait_for(self.messages.get(), 2)
-        self.assertIn('Alice', upstream['realtimeInput']['text'])
-        self.assertNotIn('video', upstream['realtimeInput'])
+        # Nothing is pushed to Gemini; it asks with the people_present tool instead.
+        await self.provider.send_json({'toolCall': {'functionCalls': [{'id': '1', 'name': 'people_present'}]}})
+        reply = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses'][0]
+        self.assertIn('Alice', reply['response']['result'])
         await ws.close()
 
     async def test_snapshot_post_reaches_session(self):
@@ -170,7 +172,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post('/snapshot?session=' + session, data=b'jpeg', headers=self.headers)
         self.assertEqual((await response.json())['names'], ['Alice'])
         self.assertEqual((await ws.receive_json(timeout=2))['names'], ['Alice'])
-        self.assertIn('Alice', (await asyncio.wait_for(self.messages.get(), 2))['realtimeInput']['text'])
+        self.assertTrue(self.messages.empty())
         await ws.close()
         await asyncio.sleep(0.1)
         self.assertEqual(self.app[conversation.SNAPSHOT_TARGETS], {})

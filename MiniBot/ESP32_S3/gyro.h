@@ -12,10 +12,13 @@ uint8_t GYRO_GetThresholdMultiplier();
 // Wake/sleep require at least the saved tap count (1-3).
 uint8_t GYRO_GetWakeTapThreshold();
 bool GYRO_SetWakeTapThreshold(uint8_t value);
-uint8_t GYRO_GetSleepTapThreshold();
-bool GYRO_SetSleepTapThreshold(uint8_t value);
 uint8_t GYRO_PollTaps();
+// While sleeping: true for enough taps, or (after a tilt sleep) when the robot stands upright again.
 bool GYRO_ConfirmTapWake();
+// Awake: true once the robot, upright since waking, lies on a side (> 70 deg) for 1 s.
+bool GYRO_PollTiltSleep();
+// After waking: whether the sleep was a tilt sleep (clears it).
+bool GYRO_TakeTiltWake();
 // Set config base * multiplier (0-12); reject products above 255 mg.
 bool GYRO_SetWakeThreshold(uint8_t multiplier);
 // Arm IMU INT1 for light-sleep motion wake.

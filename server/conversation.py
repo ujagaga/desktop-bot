@@ -34,7 +34,7 @@ GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
 VOICE_FILE = web.AppKey('voice_file', str)
 COMMANDS = web.AppKey('commands', dict)
-# Session id -> (device, upstream, http) so the robot's camera can POST /snapshot into it.
+# Session id -> (device, seen, http) so the robot's camera can POST /snapshot into it.
 SNAPSHOT_TARGETS = web.AppKey('snapshot_targets', dict)
 
 
@@ -88,6 +88,11 @@ async def health(request):
     return web.json_response({'status': 'ok', 'gemini_configured': bool(request.app[CONFIG]['gemini_key'])})
 
 
+# Camera recognition stays on the gateway; Gemini asks for it only when the conversation needs it.
+PEOPLE_TOOL = {'name': 'people_present', 'description': 'Names of people the robot camera recognized '
+               'during this conversation. Uncertain and not proof of who is speaking.'}
+
+
 def setup_message(config, now=None, commands=None):
     # Gemini has no clock: give it the Pi's local date and time at session start.
     now = now or datetime.now().astimezone()
@@ -103,9 +108,9 @@ def setup_message(config, now=None, commands=None):
         'outputAudioTranscription': {},
         'contextWindowCompression': {'slidingWindow': {}},
     }
+    setup['tools'] = [{'functionDeclarations': [PEOPLE_TOOL] + [
+        {'name': name, 'description': module.DESCRIPTION} for name, module in (commands or {}).items()]}]
     if commands:
-        setup['tools'] = [{'functionDeclarations': [
-            {'name': name, 'description': module.DESCRIPTION} for name, module in commands.items()]}]
         setup['systemInstruction']['parts'][0]['text'] += (' When a tool fits the request, call it and say its'
             ' result without adding to it.')
     return {'setup': setup}
@@ -116,7 +121,8 @@ def load_commands(folder):
 
     run() returns the text to say, or a dict with 'say' and optional robot display fields: 'clock'
     (big time text), or 'face' (0-15) and 'text' (footer under the face, or full screen without one);
-    'seconds' shows them that long instead of until the session ends.
+    'seconds' shows them that long instead of until the session ends. 'sleep': True puts the robot
+    to sleep once Gemini has finished speaking.
     """
     commands = {}
     for path in sorted(glob.glob(os.path.join(folder, '[!_]*.py'))):
@@ -142,14 +148,16 @@ async def run_command(commands, call, device):
                 display[key] = kind(result[key])
         if len(display) > 1:
             await device.send_json(display)
+        if result.get('sleep'):
+            await device.send_json({'type': 'sleep'})
         return {'result': str(result.get('say', ''))}
     except Exception as error:
         logger.warning('Command %s failed: %s', call['name'], type(error).__name__)
         return {'error': 'Command failed.'}
 
 
-async def observe(jpeg, device, upstream, http, config):
-    """Recognize faces in a JPEG and tell the device and Gemini who is present."""
+async def observe(jpeg, device, seen, http, config):
+    """Recognize faces in a JPEG, tell the device, and keep the result for the people_present tool."""
     if not jpeg or len(jpeg) > 1024 * 1024:
         raise ValueError('JPEG must contain 1 byte to 1 MB.')
     try:
@@ -164,13 +172,11 @@ async def observe(jpeg, device, upstream, http, config):
     # Never forward arbitrary client-provided identity claims to the model.
     names = result.get('names', [])
     await device.send_json({'type': 'recognition', 'faces': result.get('faces', []), 'names': names})
-    await upstream.send_json({'realtimeInput': {'text':
-        'New camera observation (replaces previous observation; not speaker identification): '
-        + json.dumps({'observed_at': datetime.now(timezone.utc).isoformat(), 'people_present': names})}})
+    seen.update(observed_at=datetime.now(timezone.utc).isoformat(), people_present=names)
     return names
 
 
-async def device_messages(device, upstream, http, config):
+async def device_messages(device, upstream, http, config, seen):
     async for message in device:
         if message.type == aiohttp.WSMsgType.BINARY:
             pcm = message.data
@@ -204,7 +210,7 @@ async def device_messages(device, upstream, http, config):
                         jpeg = base64.b64decode(encoded, validate=True)
                     except (ValueError, binascii.Error):
                         raise ValueError('Invalid base64 JPEG.') from None
-                    await observe(jpeg, device, upstream, http, config)
+                    await observe(jpeg, device, seen, http, config)
                 elif kind == 'stop':
                     return
                 else:
@@ -215,7 +221,7 @@ async def device_messages(device, upstream, http, config):
             return
 
 
-async def gemini_messages(device, upstream, commands):
+async def gemini_messages(device, upstream, commands, seen):
     downsampler = Downsampler()
     async for message in upstream:
         if message.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
@@ -225,7 +231,8 @@ async def gemini_messages(device, upstream, commands):
             raise RuntimeError('Gemini rejected the session.')
         if 'toolCall' in data:
             await upstream.send_json({'toolResponse': {'functionResponses': [
-                {'id': call.get('id'), 'name': call.get('name'), 'response': await run_command(commands, call, device)}
+                {'id': call.get('id'), 'name': call.get('name'), 'response': {'result': json.dumps(seen or 'No camera observation.')} if call.get('name') == PEOPLE_TOOL['name']
+                 else await run_command(commands, call, device)}
                 for call in data['toolCall'].get('functionCalls', [])]}})
         content = data.get('serverContent', {})
         if content.get('interrupted'):
@@ -275,11 +282,12 @@ async def conversation(request):
                         or 'setupComplete' not in json.loads(first.data)):
                     raise RuntimeError('Gemini setup failed.')
                 session = secrets.token_hex(8)
-                request.app[SNAPSHOT_TARGETS][session] = (device, upstream, http)
+                seen = {}
+                request.app[SNAPSHOT_TARGETS][session] = (device, seen, http)
                 await device.send_json({'type': 'ready', 'input_audio': 'pcm_s16le', 'session': session,
                     'input_sample_rate': 16000, 'output_sample_rate': OUTPUT_SAMPLE_RATE, 'channels': 1})
-                tasks = [asyncio.create_task(device_messages(device, upstream, http, config)),
-                         asyncio.create_task(gemini_messages(device, upstream, request.app[COMMANDS]))]
+                tasks = [asyncio.create_task(device_messages(device, upstream, http, config, seen)),
+                         asyncio.create_task(gemini_messages(device, upstream, request.app[COMMANDS], seen))]
                 try:
                     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     for task in done:

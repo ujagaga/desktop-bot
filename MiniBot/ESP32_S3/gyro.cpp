@@ -38,12 +38,15 @@ static_assert(GYRO_WAKE_THRESHOLD_MG > 0 && GYRO_WAKE_THRESHOLD_MG <= 255,
 static uint8_t thresholdMultiplier = 1;
 static uint8_t wakeThresholdMg = GYRO_WAKE_THRESHOLD_MG;
 static uint8_t wakeTapThreshold = 1;
-static uint8_t sleepTapThreshold = 3;
 static TapSequence taps;
 static bool accelReady = false, pulse = false, pulseValid = false;
 static float accelAverage[3] = {};
 static uint32_t lastTapSample = 0, pulseStart = 0, quietSince = 0;
 static bool quiet = false;
+// Laying the robot on a side (X, the vertical axis, tilted > 70 deg) sleeps; upright (< 30 deg) wakes.
+static constexpr float TILT_SLEEP_DEG = 70.0f, TILT_UPRIGHT_DEG = 30.0f;
+static bool tiltArmed = false, tiltSleep = false;
+static uint32_t lastTiltMs = 0, tiltSinceMs = 0;
 
 static void resetTaps() {
   taps.reset();
@@ -54,14 +57,11 @@ static void resetTaps() {
 static void loadWakeThreshold() {
   thresholdMultiplier = 1;
   wakeTapThreshold = 1;
-  sleepTapThreshold = 3;
   Preferences prefs;
   if (prefs.begin("miniBotGyro", true)) {
     uint8_t saved = prefs.getUChar("tap_mult", 1);
     uint8_t savedTaps = prefs.getUChar("wake_taps", 1);
     if (savedTaps >= 1 && savedTaps <= 3) wakeTapThreshold = savedTaps;
-    uint8_t savedSleepTaps = prefs.getUChar("sleep_taps", 3);
-    if (savedSleepTaps >= 1 && savedSleepTaps <= 3) sleepTapThreshold = savedSleepTaps;
     prefs.end();
     if (saved <= 12 && (unsigned)GYRO_WAKE_THRESHOLD_MG * saved <= 255)
       thresholdMultiplier = saved;
@@ -73,7 +73,6 @@ uint8_t GYRO_GetWakeThreshold() { return wakeThresholdMg; }
 uint8_t GYRO_GetThresholdMultiplier() { return thresholdMultiplier; }
 
 uint8_t GYRO_GetWakeTapThreshold() { return wakeTapThreshold; }
-uint8_t GYRO_GetSleepTapThreshold() { return sleepTapThreshold; }
 
 bool GYRO_SetWakeTapThreshold(uint8_t value) {
   if (value < 1 || value > 3) return false;
@@ -89,19 +88,6 @@ bool GYRO_SetWakeTapThreshold(uint8_t value) {
   return ok;
 }
 
-bool GYRO_SetSleepTapThreshold(uint8_t value) {
-  if (value < 1 || value > 3) return false;
-  Preferences prefs;
-  if (!prefs.begin("miniBotGyro", false)) return false;
-  bool ok = prefs.getUChar("sleep_taps", 0) == value ||
-            prefs.putUChar("sleep_taps", value) == sizeof(value);
-  prefs.end();
-  if (ok) {
-    sleepTapThreshold = value;
-    resetTaps();
-  }
-  return ok;
-}
 
 bool GYRO_SetWakeThreshold(uint8_t multiplier) {
   unsigned value = (unsigned)GYRO_WAKE_THRESHOLD_MG * multiplier;
@@ -340,6 +326,46 @@ uint8_t GYRO_PollTaps() {
   return pulse ? 0 : taps.finish(now);
 }
 
+// Tilt of the vertical X axis from gravity, ignoring which way up; false while accelerating.
+static bool readTiltDegrees(float *degrees) {
+  float g[3];
+  for (int axis = 0; axis < 3; ++axis) {
+    uint8_t lo, hi;
+    if (!readRegister(deviceAddress, 0x35 + axis * 2, &lo) ||
+        !readRegister(deviceAddress, 0x36 + axis * 2, &hi)) return false;
+    g[axis] = (int16_t)((uint16_t)hi << 8 | lo) / 16384.0f;
+  }
+  float norm = sqrtf(g[0] * g[0] + g[1] * g[1] + g[2] * g[2]);
+  if (norm < 0.8f || norm > 1.2f) return false;
+  *degrees = acosf(fminf(fabsf(g[0]) / norm, 1.0f)) * 180.0f / (float)M_PI;
+  return true;
+}
+
+bool GYRO_PollTiltSleep() {
+  uint32_t now = millis();
+  if (!detected || now - lastTiltMs < 100) return false;
+  lastTiltMs = now;
+  float degrees;
+  if (!readTiltDegrees(&degrees)) return false;
+  if (degrees < TILT_UPRIGHT_DEG) tiltArmed = true;
+  if (!tiltArmed || degrees <= TILT_SLEEP_DEG) {
+    tiltSinceMs = 0;
+    return false;
+  }
+  if (!tiltSinceMs) tiltSinceMs = now | 1;
+  if (now - tiltSinceMs < 1000) return false;
+  tiltArmed = false;  // Stand it up again before the next tilt sleep.
+  tiltSinceMs = 0;
+  tiltSleep = true;
+  return true;
+}
+
+bool GYRO_TakeTiltWake() {
+  bool wasTiltSleep = tiltSleep;
+  tiltSleep = false;
+  return wasTiltSleep;
+}
+
 bool GYRO_ConfirmTapWake() {
   // WoM captured the first impulse while the CPU slept. Sensor restoration
   // takes about 100 ms; only subsequent separated impulses count as more taps.
@@ -351,8 +377,17 @@ bool GYRO_ConfirmTapWake() {
   quiet = true;
   quietSince = millis() - 60;
   taps.tap(millis());
-  uint32_t start = millis();
+  uint32_t start = millis(), uprightSince = 0;
   while (millis() - start < 2000) {
+    float degrees;
+    if (tiltSleep && readTiltDegrees(&degrees) && degrees < TILT_UPRIGHT_DEG) {
+      if (!uprightSince) uprightSince = millis() | 1;
+      if (millis() - uprightSince >= 500) {
+        Serial.println("GYRO: upright again while sleeping");
+        resetTaps();
+        return true;
+      }
+    } else uprightSince = 0;
     uint8_t count = GYRO_PollTaps();
     if (count) {
       Serial.printf("GYRO: %u tap(s) while sleeping\n", count);

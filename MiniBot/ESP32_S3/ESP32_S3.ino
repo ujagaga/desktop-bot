@@ -52,7 +52,18 @@ void loop() {
   MOTOR_Process();
   uint8_t taps = GYRO_PollTaps();
   if (taps) Serial.printf("GYRO: %u tap(s)\n", taps);
-  if (taps >= GYRO_GetSleepTapThreshold()) COMMS_Execute("sleep", Serial);
+  static unsigned long calibrateAt = 0;
+  if (!VOICE_IsBusy() && GYRO_PollTiltSleep()) {
+    Serial.println("GYRO: lying on a side; sleeping");
+    COMMS_Execute("sleep", Serial);
+    // Recalibrate once the robot has settled after being stood up.
+    if (GYRO_TakeTiltWake()) calibrateAt = millis() | 1;
+  }
+  if (calibrateAt && millis() - calibrateAt >= 3000) {
+    calibrateAt = 0;
+    float biasDps[3];
+    if (!GYRO_Calibrate(biasDps)) Serial.println("GYRO: calibration failed");
+  }
   HTTP_SERVER_Process();
   HTTP_CLIENT_Process();
   if (WAKEWORD_TakeDetection()) {

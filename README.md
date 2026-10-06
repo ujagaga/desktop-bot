@@ -241,7 +241,8 @@ choice in `server/voice.json` that overrides it. Both require `X-API-Key`.
 
 The `ready` message carries a `session` id; `POST /snapshot?session=<id>` with
 `X-API-Key` and a raw JPEG body (the robot's camera uses it) runs face recognition
-and tells that session's Gemini who is present, like a WebSocket `snapshot`.
+for that session, like a WebSocket `snapshot`. The result stays on the gateway:
+Gemini asks for it with the built-in `people_present` tool only when needed.
 
 Each `server/commands/<name>.py` with a `DESCRIPTION` string and a `run()`
 function returning text becomes a Gemini tool named `<name>`. When a request
@@ -254,6 +255,7 @@ Gemini speaks the result. Commands load at startup: restart
 `text` full screen without a face. `clock` instead shows big time text (as
 `commands/time.py` does). All display fields are optional; the display stays
 until the session ends, or exactly `seconds` (up to 600), then the normal screen returns.
+`"sleep": true` puts the robot to sleep after Gemini's reply (`commands/sleep.py`).
 
 ## HTTP API
 

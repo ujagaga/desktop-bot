@@ -545,30 +545,26 @@ static bool cmdGyroThreshold(Print *output, const char *args) {
 
 static bool cmdGyroTap(Print *output, const char *args) {
   char action[16];
-  if (sscanf(args, "%15s", action) != 1 ||
-      (strcasecmp(action, "wake") != 0 && strcasecmp(action, "sleep") != 0)) {
-    output->println("ERR gyro tap <wake|sleep> [1-3]");
+  if (sscanf(args, "%15s", action) != 1 || strcasecmp(action, "wake") != 0) {
+    output->println("ERR gyro tap wake [1-3]");
     return false;
   }
-  bool wake = strcasecmp(action, "wake") == 0;
   while (*args && !isspace((unsigned char)*args)) ++args;
   while (isspace((unsigned char)*args)) ++args;
   if (*args) {
     char digit = *args++;
     while (isspace((unsigned char)*args)) ++args;
     if (digit < '1' || digit > '3' || *args) {
-      output->println("ERR gyro tap <wake|sleep> [1-3]");
+      output->println("ERR gyro tap wake [1-3]");
       return false;
     }
-    if (!(wake ? GYRO_SetWakeTapThreshold(digit - '0')
-               : GYRO_SetSleepTapThreshold(digit - '0'))) {
+    if (!GYRO_SetWakeTapThreshold(digit - '0')) {
       output->println("ERR cannot save gyro tap count; unchanged");
       return false;
     }
   }
-  unsigned value = wake ? GYRO_GetWakeTapThreshold() : GYRO_GetSleepTapThreshold();
-  output->printf("GYRO TAP %s %u (requires %u or more taps)\n",
-                 wake ? "WAKE" : "SLEEP", value, value);
+  unsigned value = GYRO_GetWakeTapThreshold();
+  output->printf("GYRO TAP WAKE %u (requires %u or more taps)\n", value, value);
   return true;
 }
 
@@ -646,7 +642,6 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  voice [start|stop|url <url>|key <key>|name <voice>]");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
-  output->println("  gyro tap sleep [1-3] (sleep at or above selected count)");
   output->println("  gyro tap wake [1-3] (wake at or above selected count)");
   output->println("  gyro threshold [0-12]");
   output->println("  gyro rate <x|y|z|0|1|2>");

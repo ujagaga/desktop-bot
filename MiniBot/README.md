@@ -154,26 +154,33 @@ screen without a face; `"clock":"14:32"` instead shows big time text. It stays u
 ends, or exactly S seconds (max 600) when given; then the normal screen (neutral face) returns.
 
 When a session is ready, the S3 sends `snapshot <session>` to a discovered CAM, which POSTs one
-frame to the gateway's `/snapshot` so Gemini knows who is present (see the CAM README for its
+frame to the gateway's `/snapshot`; Gemini can ask who is present when needed.
+A `{"type":"sleep"}` message (from a command such as `sleep.py`) makes the robot wait for
+Gemini's reply to finish, end the session and run `sleep` (see the CAM README for its
 gateway settings).
 
-## Tap sleep and wake
+## Sleep and tap wake
 
 GPIO7 capacitive touch support and its commands have been removed. The IMU
 now groups acceleration impulses into single, double, triple, or longer tap
 sequences. Allow 120–500 ms between taps, and then pause for over 500 ms:
 
-- Awake: a sequence at or above the saved sleep count enters sleep (default 3).
+- Awake: taps no longer cause sleep (it was too sensitive). Use the `sleep`
+  command, ask in a voice session ("go to sleep"; `server/commands/sleep.py`),
+  or lay the robot on any side: once it has been upright (vertical X axis within
+  30° of gravity, by accelerometer), a tilt above 70° held for 1 s sleeps, after
+  any voice session ends.
+- After a tilt sleep, standing the robot upright again for 0.5 s wakes it (the
+  lift triggers motion wake), and `gyro calibrate` runs 3 s later. Taps still wake it.
 - Sleeping: a first motion event briefly wakes the CPU with LCD/Wi-Fi off.
   A sequence at or above the saved wake count completes the wake (default 1);
   fewer taps return the CPU to sleep.
-- UART wake remains available. A wake sequence is consumed, so three taps
-  while sleeping do not immediately send the robot back to sleep.
+- UART wake remains available.
 
-Set the counts independently with `gyro tap sleep <1-3>` and
-`gyro tap wake <1-3>`. Both comparisons are inclusive: setting 2 means two or
-more taps. Omit the number to read the current setting. Both counts survive
-restarts in Preferences; repeating an unchanged saved setting avoids a flash write.
+Set the wake count with `gyro tap wake <1-3>`. The comparison is inclusive:
+setting 2 means two or more taps. Omit the number to read the current setting.
+The count survives restarts in Preferences; repeating an unchanged saved setting
+avoids a flash write.
 A sequence is evaluated after the quiet interval, not immediately on the nth tap.
 
 The first sleeping impulse is detected by hardware WoM; subsequent impulses
@@ -299,7 +306,6 @@ gyro rate <x|y|z|0|1|2>
 gyro calibrate
 gyro threshold [0-10]
 gyro tap wake [1-3]
-gyro tap sleep [1-3]
 ```
 
 - `gyro rate` reports angular velocity in degrees per second (`dps`).
@@ -307,8 +313,8 @@ gyro tap sleep [1-3]
 - `gyro calibrate` averages the stationary gyro bias for about one second and resets the integrated angles.
 - `gyro threshold` reads or saves the acceleration sensitivity multiplier; see
   [Motion wake sensitivity](#motion-wake-sensitivity).
-- `gyro tap wake` and `gyro tap sleep` read or save independent minimum tap
-  counts. Values 1–3 mean that many taps or more, not strictly more.
+- `gyro tap wake` reads or saves the minimum wake tap count. Values 1–3 mean
+  that many taps or more, not strictly more.
 
 Gyro bias is loaded from Preferences namespace `miniBotGyro`, key `bias_v1`,
 at startup. If no valid saved bias exists, startup calibrates once. The
@@ -472,7 +478,7 @@ allocation is needed between these modules.
 | `miniBotWiFi` | `ssid`, `pass` | Wi-Fi credentials |
 | `miniBotGyro` | `bias_v1` | Three gyro bias values |
 | `miniBotGyro` | `tap_mult` | Acceleration threshold multiplier |
-| `miniBotGyro` | `wake_taps`, `sleep_taps` | Minimum wake/sleep tap counts |
+| `miniBotGyro` | `wake_taps` | Minimum wake tap count |
 | `miniBotLCD` | `bg`, `fg` | LCD RGB565 colors |
 | `miniBotOTA` | `target` | Advertised OTA target for restart validation |
 | `miniBotVoice` | `url`, `key` | Gemini gateway URL and device API key |
@@ -615,7 +621,7 @@ The command parser currently accepts 0–10. The underlying setter permits 0–1
 but rejects products above the sensor maximum of 255 mg; with the current base,
 10 gives 250 mg and 11–12 would exceed that maximum. The runtime `help` output
 still lists 0–12, so follow the parser's 0–10 range.
-Zero disables tap sleep/wake, leaving UART wake available. Higher values
+Zero disables tap wake, leaving UART wake available. Higher values
 require stronger acceleration impulses; this is not a rotation-angle threshold.
 
 The multiplier is saved under `miniBotGyro` / `tap_mult` and restored at boot.

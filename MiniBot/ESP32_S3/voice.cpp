@@ -57,6 +57,8 @@ unsigned long errorFaceMs = 0;
 // A gateway command's display stays displayHoldMs, or until the session ends when that is 0.
 bool displayHeld = false;
 unsigned long displayStartMs = 0, displayHoldMs = 0;
+// A gateway command asked for sleep: wait for Gemini to finish its reply first.
+bool sleepPending = false, sleepTurnDone = false;
 unsigned long lastHealthMs = 0;
 bool serverOk = true;  // until a health check says otherwise
 int healthCode = 0;
@@ -214,6 +216,11 @@ void handleText(const uint8_t *payload, size_t length) {
     endSession("gateway error");
   } else if (strcmp(type, "display") == 0) {
     showDisplay(doc["clock"] | (const char *)nullptr, doc["face"] | -1, doc["text"] | (const char *)nullptr, doc["seconds"] | 0UL);
+  } else if (strcmp(type, "sleep") == 0) {
+    sleepPending = true;
+    sleepTurnDone = false;
+  } else if (strcmp(type, "turn_complete") == 0) {
+    if (sleepPending) sleepTurnDone = true;
   } else if (strcmp(type, "session_ending") == 0) {
     endSession("gateway ended session");
   }
@@ -298,6 +305,11 @@ void VOICE_Process() {
   if (displayHeld && displayHoldMs && millis() - displayStartMs >= displayHoldMs) {
     displayHeld = false;
     if (!errorFaceMs) SCREEN_Refresh();
+  }
+  if (sleepPending && (state == State::Idle || (sleepTurnDone && !speaking()))) {
+    sleepPending = false;
+    endSession(nullptr);
+    COMMS_Execute("sleep", Serial);
   }
   if (errorFaceMs && millis() - errorFaceMs > ERROR_FACE_MS) {
     errorFaceMs = 0;
