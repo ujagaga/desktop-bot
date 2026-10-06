@@ -140,7 +140,7 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
     async def test_commands_are_declared_and_run(self):
         ws = await self.connect()
         declared = self.setup['setup']['tools'][0]['functionDeclarations']
-        self.assertEqual([d['name'] for d in declared], ['people_present', 'broken', 'hello', 'show'])
+        self.assertEqual([d['name'] for d in declared], ['people_present', 'set_language', 'broken', 'hello', 'show'])
         await self.provider.send_json({'toolCall': {'functionCalls': [
             {'id': '1', 'name': 'hello', 'args': {}}, {'id': '2', 'name': 'broken'}, {'id': '3', 'name': 'nope'}]}})
         responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
@@ -154,6 +154,18 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
         self.assertEqual(responses[0]['response'], {'result': '14:32'})
         await ws.close()
+
+    async def test_language_defaults_to_serbian_and_persists(self):
+        ws = await self.connect()
+        self.assertIn('Conversation language: Serbian', self.setup['setup']['systemInstruction']['parts'][0]['text'])
+        await self.provider.send_json({'toolCall': {'functionCalls': [
+            {'id': '1', 'name': 'set_language', 'args': {'language': 'en'}},
+            {'id': '2', 'name': 'set_language', 'args': {'language': 'de'}}]}})
+        responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
+        self.assertEqual([r['response'] for r in responses], [{'result': 'saved'}, {'error': 'Use sr or en.'}])
+        await ws.close()
+        reloaded = conversation.create_app(dict(self.config), voice_file=self.voice_file)
+        self.assertEqual(reloaded[conversation.CONFIG]['language'], 'en')
 
     async def test_snapshot_is_recognized_locally(self):
         ws = await self.connect()

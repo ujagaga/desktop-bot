@@ -242,7 +242,12 @@ choice in `server/voice.json` that overrides it. Both require `X-API-Key`.
 The `ready` message carries a `session` id; `POST /snapshot?session=<id>` with
 `X-API-Key` and a raw JPEG body (the robot's camera uses it) runs face recognition
 for that session, like a WebSocket `snapshot`. The result stays on the gateway:
-Gemini asks for it with the built-in `people_present` tool only when needed.
+Gemini asks for it with the built-in `people_present` tool only when needed. Asked "who am I?",
+it says the recognized name or that it does not know.
+
+Gemini speaks Serbian (Latin script) by default. When the user speaks English
+(or back to Serbian) it calls the built-in `set_language` tool; the gateway saves
+the last language in `server/language.json` and starts every new conversation in it.
 
 **Drive page:** `/drive` on the server UI (Google login) shows the robot camera
 and hold-to-drive buttons with a speed slider. The robot CAM keeps a persistent

@@ -37,6 +37,7 @@ CONFIG = web.AppKey('settings', dict)
 GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
 VOICE_FILE = web.AppKey('voice_file', str)
+LANGUAGE_FILE = web.AppKey('language_file', str)
 COMMANDS = web.AppKey('commands', dict)
 # Session id -> (device, seen, http) so the robot's camera can POST /snapshot into it.
 SNAPSHOT_TARGETS = web.AppKey('snapshot_targets', dict)
@@ -96,7 +97,15 @@ async def health(request):
 
 # Camera recognition stays on the gateway; Gemini asks for it only when the conversation needs it.
 PEOPLE_TOOL = {'name': 'people_present', 'description': 'Names of people the robot camera recognized '
-               'during this conversation. Uncertain and not proof of who is speaking.'}
+               'during this conversation ("unknown" for an unrecognized face). Uncertain and not proof of who '
+               'is speaking. Call it when asked who the user is: say the recognized name, or say you do not '
+               'know them if there is no name other than "unknown".'}
+# Serbian first; English when the user speaks it. The last one heard is kept across conversations.
+LANGUAGES = {'sr': 'Serbian (Latin script)', 'en': 'English'}
+LANGUAGE_TOOL = {'name': 'set_language', 'description': 'Call when the user speaks the other of Serbian and '
+                 'English than the current conversation language; then reply in that language.',
+                 'parameters': {'type': 'OBJECT', 'properties': {'language': {'type': 'STRING', 'enum': ['sr', 'en']}},
+                                'required': ['language']}}
 
 
 def setup_message(config, now=None, commands=None):
@@ -114,7 +123,11 @@ def setup_message(config, now=None, commands=None):
         'outputAudioTranscription': {},
         'contextWindowCompression': {'slidingWindow': {}},
     }
-    setup['tools'] = [{'functionDeclarations': [PEOPLE_TOOL] + [
+    if config.get('language') in LANGUAGES:
+        setup['systemInstruction']['parts'][0]['text'] += (
+            f" Conversation language: {LANGUAGES[config['language']]}. Speak it from your first words, including tool"
+            ' results. If the user speaks the other of Serbian and English, call set_language and switch.')
+    setup['tools'] = [{'functionDeclarations': [PEOPLE_TOOL, LANGUAGE_TOOL] + [
         {'name': name, 'description': module.DESCRIPTION} for name, module in (commands or {}).items()]}]
     if commands:
         setup['systemInstruction']['parts'][0]['text'] += (' When a tool fits the request, call it and say its'
@@ -227,7 +240,16 @@ async def device_messages(device, upstream, http, config, seen):
             return
 
 
-async def gemini_messages(device, upstream, commands, seen):
+def save_language(config, path, language):
+    if language not in LANGUAGES:
+        return {'error': 'Use sr or en.'}
+    config['language'] = language
+    with open(path, 'w') as f:
+        json.dump({'language': language}, f)
+    return {'result': 'saved'}
+
+
+async def gemini_messages(device, upstream, commands, seen, config, language_file):
     downsampler = Downsampler()
     async for message in upstream:
         if message.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
@@ -236,10 +258,16 @@ async def gemini_messages(device, upstream, commands, seen):
         if 'error' in data:
             raise RuntimeError('Gemini rejected the session.')
         if 'toolCall' in data:
-            await upstream.send_json({'toolResponse': {'functionResponses': [
-                {'id': call.get('id'), 'name': call.get('name'), 'response': {'result': json.dumps(seen or 'No camera observation.')} if call.get('name') == PEOPLE_TOOL['name']
-                 else await run_command(commands, call, device)}
-                for call in data['toolCall'].get('functionCalls', [])]}})
+            responses = []
+            for call in data['toolCall'].get('functionCalls', []):
+                if call.get('name') == PEOPLE_TOOL['name']:
+                    response = {'result': json.dumps(seen or 'No camera observation.')}
+                elif call.get('name') == LANGUAGE_TOOL['name']:
+                    response = save_language(config, language_file, (call.get('args') or {}).get('language'))
+                else:
+                    response = await run_command(commands, call, device)
+                responses.append({'id': call.get('id'), 'name': call.get('name'), 'response': response})
+            await upstream.send_json({'toolResponse': {'functionResponses': responses}})
         content = data.get('serverContent', {})
         if content.get('interrupted'):
             await device.send_json({'type': 'interrupted'})
@@ -293,7 +321,8 @@ async def conversation(request):
                 await device.send_json({'type': 'ready', 'input_audio': 'pcm_s16le', 'session': session,
                     'input_sample_rate': 16000, 'output_sample_rate': OUTPUT_SAMPLE_RATE, 'channels': 1})
                 tasks = [asyncio.create_task(device_messages(device, upstream, http, config, seen)),
-                         asyncio.create_task(gemini_messages(device, upstream, request.app[COMMANDS], seen))]
+                         asyncio.create_task(gemini_messages(device, upstream, request.app[COMMANDS], seen, config,
+                                                             request.app[LANGUAGE_FILE]))]
                 try:
                     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     for task in done:
@@ -436,6 +465,14 @@ def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None, commands_dir
     try:
         with open(app[VOICE_FILE]) as f:
             app[CONFIG]['voice'] = json.load(f)['voice']
+    except (OSError, ValueError, KeyError):
+        pass
+    # The last language set_language saved, next to voice.json.
+    app[LANGUAGE_FILE] = os.path.join(os.path.dirname(app[VOICE_FILE]), 'language.json')
+    app[CONFIG]['language'] = 'sr'
+    try:
+        with open(app[LANGUAGE_FILE]) as f:
+            app[CONFIG]['language'] = json.load(f)['language']
     except (OSError, ValueError, KeyError):
         pass
     app[COMMANDS] = load_commands(commands_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'commands'))

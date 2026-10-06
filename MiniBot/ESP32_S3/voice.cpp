@@ -57,6 +57,9 @@ unsigned long errorFaceMs = 0;
 // A gateway command's display stays displayHoldMs, or until the session ends when that is 0.
 bool displayHeld = false;
 unsigned long displayStartMs = 0, displayHoldMs = 0;
+// Recognized someone: happy face, a 1 s wink, then happy again (0 = no wink running).
+unsigned long winkStartMs = 0;
+bool winking = false;
 // A gateway command asked for sleep: wait for Gemini to finish its reply first.
 bool sleepPending = false, sleepTurnDone = false;
 unsigned long lastHealthMs = 0;
@@ -193,6 +196,8 @@ void endSession(const char *error) {
   bool connected = socket.isConnected();
   state = State::Idle;  // before disconnect(): its event must not end the session twice
   WAKEWORD_SetCapture(nullptr);
+  winkStartMs = 0;
+  winking = false;
   if (connected) socket.sendTXT("{\"type\":\"stop\"}");
   socket.disconnect();
   showResult(error);
@@ -216,6 +221,12 @@ void handleText(const uint8_t *payload, size_t length) {
     endSession("gateway error");
   } else if (strcmp(type, "display") == 0) {
     showDisplay(doc["clock"] | (const char *)nullptr, doc["face"] | -1, doc["text"] | (const char *)nullptr, doc["seconds"] | 0UL);
+  } else if (strcmp(type, "recognition") == 0) {
+    bool known = false;
+    for (JsonVariant name : doc["names"].as<JsonArray>()) known |= strcmp(name | "unknown", "unknown") != 0;
+    FACE_Show(known ? 1 : 0);  // 01_happy or 00_neutral
+    winkStartMs = known ? millis() | 1 : 0;
+    winking = false;
   } else if (strcmp(type, "sleep") == 0) {
     sleepPending = true;
     sleepTurnDone = false;
@@ -305,6 +316,17 @@ void VOICE_Process() {
   if (displayHeld && displayHoldMs && millis() - displayStartMs >= displayHoldMs) {
     displayHeld = false;
     if (!errorFaceMs) SCREEN_Refresh();
+  }
+  if (winkStartMs) {
+    unsigned long elapsed = millis() - winkStartMs;
+    if (!winking && elapsed >= 400 && elapsed < 1400) {
+      FACE_Show(5);  // 05_wink
+      winking = true;
+    } else if (elapsed >= 1400) {
+      FACE_Show(1);
+      winking = false;
+      winkStartMs = 0;
+    }
   }
   if (sleepPending && (state == State::Idle || (sleepTurnDone && !speaking()))) {
     sleepPending = false;

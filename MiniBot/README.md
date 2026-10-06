@@ -155,6 +155,8 @@ ends, or exactly S seconds (max 600) when given; then the normal screen (neutral
 
 When a session is ready, the S3 sends `snapshot <session>` to a discovered CAM, which POSTs one
 frame to the gateway's `/snapshot`; Gemini can ask who is present when needed.
+When the recognition result arrives, the robot shows 01_happy, winks (05_wink) for
+1 s and returns to 01_happy if anyone is recognized; otherwise it shows 00_neutral.
 A `{"type":"sleep"}` message (from a command such as `sleep.py`) makes the robot wait for
 Gemini's reply to finish, end the session and run `sleep` (see the CAM README for its
 gateway settings).
