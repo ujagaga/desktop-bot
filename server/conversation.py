@@ -4,6 +4,8 @@
 import asyncio
 import base64
 import binascii
+import glob
+import importlib.util
 import json
 import logging
 import os
@@ -30,6 +32,7 @@ CONFIG = web.AppKey('settings', dict)
 GEMINI_ENDPOINT = web.AppKey('gemini_url', str)
 SESSIONS = web.AppKey('sessions', set)
 VOICE_FILE = web.AppKey('voice_file', str)
+COMMANDS = web.AppKey('commands', dict)
 
 
 def settings():
@@ -82,21 +85,64 @@ async def health(request):
     return web.json_response({'status': 'ok', 'gemini_configured': bool(request.app[CONFIG]['gemini_key'])})
 
 
-def setup_message(config, now=None):
+def setup_message(config, now=None, commands=None):
     # Gemini has no clock: give it the Pi's local date and time at session start.
     now = now or datetime.now().astimezone()
     clock = now.strftime(' Current local date and time at the start of this conversation: %A, %d %B %Y, %H:%M (UTC%z).')
     generation = {'responseModalities': ['AUDIO']}
     if config.get('voice'):
         generation['speechConfig'] = {'voiceConfig': {'prebuiltVoiceConfig': {'voiceName': config['voice']}}}
-    return {'setup': {
+    setup = {
         'model': 'models/' + config['model'].removeprefix('models/'),
         'generationConfig': generation,
         'systemInstruction': {'parts': [{'text': config['instructions'] + clock}]},
         'inputAudioTranscription': {},
         'outputAudioTranscription': {},
         'contextWindowCompression': {'slidingWindow': {}},
-    }}
+    }
+    if commands:
+        setup['tools'] = [{'functionDeclarations': [
+            {'name': name, 'description': module.DESCRIPTION} for name, module in commands.items()]}]
+        setup['systemInstruction']['parts'][0]['text'] += (' When a tool fits the request, call it and say its'
+            ' result without adding to it.')
+    return {'setup': setup}
+
+
+def load_commands(folder):
+    """Each commands/<name>.py defines DESCRIPTION and run(); Gemini calls it as tool <name>.
+
+    run() returns the text to say, or a dict with 'say' and optional robot display fields: 'clock'
+    (big time text), or 'face' (0-15) and 'text' (footer under the face, or full screen without one);
+    'seconds' shows them that long instead of until the session ends.
+    """
+    commands = {}
+    for path in sorted(glob.glob(os.path.join(folder, '[!_]*.py'))):
+        name = os.path.splitext(os.path.basename(path))[0]
+        spec = importlib.util.spec_from_file_location('commands.' + name, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        commands[name] = module
+    return commands
+
+
+async def run_command(commands, call, device):
+    module = commands.get(call.get('name'))
+    if not module:
+        return {'error': 'Unknown command.'}
+    try:
+        result = await asyncio.wait_for(asyncio.to_thread(module.run), 10)
+        if not isinstance(result, dict):
+            return {'result': str(result)}
+        display = {'type': 'display'}
+        for key, kind in [('clock', str), ('face', int), ('text', str), ('seconds', int)]:
+            if key in result:
+                display[key] = kind(result[key])
+        if len(display) > 1:
+            await device.send_json(display)
+        return {'result': str(result.get('say', ''))}
+    except Exception as error:
+        logger.warning('Command %s failed: %s', call['name'], type(error).__name__)
+        return {'error': 'Command failed.'}
 
 
 async def device_messages(device, upstream, http, config):
@@ -160,7 +206,7 @@ async def device_messages(device, upstream, http, config):
             return
 
 
-async def gemini_messages(device, upstream):
+async def gemini_messages(device, upstream, commands):
     downsampler = Downsampler()
     async for message in upstream:
         if message.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
@@ -168,6 +214,10 @@ async def gemini_messages(device, upstream):
         data = json.loads(message.data)
         if 'error' in data:
             raise RuntimeError('Gemini rejected the session.')
+        if 'toolCall' in data:
+            await upstream.send_json({'toolResponse': {'functionResponses': [
+                {'id': call.get('id'), 'name': call.get('name'), 'response': await run_command(commands, call, device)}
+                for call in data['toolCall'].get('functionCalls', [])]}})
         content = data.get('serverContent', {})
         if content.get('interrupted'):
             await device.send_json({'type': 'interrupted'})
@@ -209,7 +259,7 @@ async def conversation(request):
             async with http.ws_connect(request.app[GEMINI_ENDPOINT],
                 headers={'x-goog-api-key': config['gemini_key']}, heartbeat=30,
                 max_msg_size=4 * 1024 * 1024, timeout=aiohttp.ClientWSTimeout(ws_close=5)) as upstream:
-                await upstream.send_json(setup_message(config))
+                await upstream.send_json(setup_message(config, commands=request.app[COMMANDS]))
                 # Gemini sends JSON in binary frames, including setupComplete.
                 first = await upstream.receive(timeout=20)
                 if (first.type not in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY)
@@ -218,7 +268,7 @@ async def conversation(request):
                 await device.send_json({'type': 'ready', 'input_audio': 'pcm_s16le',
                     'input_sample_rate': 16000, 'output_sample_rate': OUTPUT_SAMPLE_RATE, 'channels': 1})
                 tasks = [asyncio.create_task(device_messages(device, upstream, http, config)),
-                         asyncio.create_task(gemini_messages(device, upstream))]
+                         asyncio.create_task(gemini_messages(device, upstream, request.app[COMMANDS]))]
                 try:
                     done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                     for task in done:
@@ -264,7 +314,7 @@ async def shutdown(app):
     await asyncio.gather(*(ws.close(code=1001, message=b'Server shutdown') for ws in list(app[SESSIONS])))
 
 
-def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None):
+def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None, commands_dir=None):
     app = web.Application(client_max_size=MAX_MESSAGE)
     app[CONFIG] = settings() if config is None else config
     # A voice saved through /voice overrides GEMINI_VOICE.
@@ -274,6 +324,7 @@ def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None):
             app[CONFIG]['voice'] = json.load(f)['voice']
     except (OSError, ValueError, KeyError):
         pass
+    app[COMMANDS] = load_commands(commands_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), 'commands'))
     app[GEMINI_ENDPOINT] = gemini_url
     app[SESSIONS] = set()
     app.router.add_get('/health', health)

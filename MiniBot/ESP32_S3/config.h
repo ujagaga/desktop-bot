@@ -2,7 +2,7 @@
 #define MINIBOT_CONFIG_H
 
 // Update before building a new firmware release.
-#define FIRMWARE_VERSION 26
+#define FIRMWARE_VERSION 27
 
 #define OTA_GITHUB_REPOSITORY "ujagaga/desktop-bot"
 #define OTA_GITHUB_BRANCH "main"
@@ -18,7 +18,7 @@
 
 // QMI8658 INT1 is wired to GPIO46. WoM threshold is acceleration, not angle.
 #define GYRO_MOTION_WAKE_GPIO 46
-#define GYRO_WAKE_THRESHOLD_MG 25
+#define GYRO_WAKE_THRESHOLD_MG 50
 // Write NVS only when any bias differs this much from the last saved value.
 #define GYRO_BIAS_SAVE_DELTA_DPS 0.25f
 

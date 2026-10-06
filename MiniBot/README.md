@@ -148,6 +148,11 @@ voice stop
   Pi (`server/voice.json`, overriding `GEMINI_VOICE`) for all new sessions.
 - `voice start` opens a session without the wake word; `voice stop` ends it.
 
+A gateway command (`server/commands/`) can send `{"type":"display","face":N,"text":"...","seconds":S}`:
+the robot shows face N (0–15) with the text as a footer (about 20 characters), or the text full
+screen without a face; `"clock":"14:32"` instead shows big time text. It stays until the session
+ends, or exactly S seconds (max 600) when given; then the normal screen (neutral face) returns.
+
 ## Tap sleep and wake
 
 GPIO7 capacitive touch support and its commands have been removed. The IMU

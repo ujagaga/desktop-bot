@@ -239,6 +239,18 @@ selects a prebuilt Gemini voice; `GET /voice` lists voices and the current one,
 and `POST /voice` with `{"voice": "<name>"}` (or `""` for the default) saves a
 choice in `server/voice.json` that overrides it. Both require `X-API-Key`.
 
+Each `server/commands/<name>.py` with a `DESCRIPTION` string and a `run()`
+function returning text becomes a Gemini tool named `<name>`. When a request
+fits the description, Gemini calls it, the gateway runs `run()` (10 s limit), and
+Gemini speaks the result. Commands load at startup: restart
+`face-conversation.service` after adding one. `commands/time.py` is an example.
+`run()` may instead return a dict such as
+`{"say": "14:32", "face": 5, "text": "14:32", "seconds": 10}`: Gemini speaks
+`say`, and the robot shows face `face` (0–15) with `text` as a footer line, or
+`text` full screen without a face. `clock` instead shows big time text (as
+`commands/time.py` does). All display fields are optional; the display stays
+until the session ends, or exactly `seconds` (up to 600), then the normal screen returns.
+
 ## HTTP API
 
 Clients authenticate with the `X-API-Key` header for both endpoints.

@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "config.h"
 #include "faces.h"
+#include "lcd.h"
 #include "screen.h"
 #include "wake_word.h"
 
@@ -33,6 +34,7 @@ constexpr unsigned long ECHO_TAIL_MS = 300;
 constexpr float CHIME_AMPLITUDE = 3000.0f;  // about -21 dBFS
 constexpr unsigned long ERROR_FACE_MS = 2000;
 constexpr unsigned long HEALTH_INTERVAL_MS = 60000;
+constexpr unsigned long MAX_DISPLAY_S = 600;
 
 enum class State { Idle, Connecting, Active };
 const char *const STATE_NAMES[] = { "idle", "connecting", "active" };
@@ -51,6 +53,9 @@ unsigned long lastActivityMs = 0;
 bool audioSinceEnd = false;
 const char *lastError = "none";
 unsigned long errorFaceMs = 0;
+// A gateway command's display stays displayHoldMs, or until the session ends when that is 0.
+bool displayHeld = false;
+unsigned long displayStartMs = 0, displayHoldMs = 0;
 unsigned long lastHealthMs = 0;
 bool serverOk = true;  // until a health check says otherwise
 int healthCode = 0;
@@ -135,9 +140,22 @@ void showResult(const char *error) {
     lastError = error;
     FACE_Show(2);  // 02_sad
     errorFaceMs = millis() | 1;
-  } else {
+  } else if (!displayHeld || !displayHoldMs) {
+    displayHeld = false;
     SCREEN_Refresh();
   }
+}
+
+void showDisplay(const char *clock, int face, const char *text, unsigned long seconds) {
+  if (clock) {
+    LCD_ShowTime(clock, "");
+  } else {
+    bool faceShown = face >= 0 && FACE_Show(face);
+    if (text) faceShown ? LCD_ShowFooter(text) : LCD_ShowText(text);
+  }
+  displayHeld = true;
+  displayStartMs = millis();
+  displayHoldMs = min(seconds, MAX_DISPLAY_S) * 1000;
 }
 
 // HTTP(S) request to another gateway endpoint on the same host, authenticated with the device key.
@@ -192,6 +210,8 @@ void handleText(const uint8_t *payload, size_t length) {
   } else if (strcmp(type, "error") == 0) {
     Serial.printf("VOICE gateway error: %s\n", (const char *)(doc["error"] | ""));
     endSession("gateway error");
+  } else if (strcmp(type, "display") == 0) {
+    showDisplay(doc["clock"] | (const char *)nullptr, doc["face"] | -1, doc["text"] | (const char *)nullptr, doc["seconds"] | 0UL);
   } else if (strcmp(type, "session_ending") == 0) {
     endSession("gateway ended session");
   }
@@ -273,6 +293,10 @@ void VOICE_Stop() {
 }
 
 void VOICE_Process() {
+  if (displayHeld && displayHoldMs && millis() - displayStartMs >= displayHoldMs) {
+    displayHeld = false;
+    if (!errorFaceMs) SCREEN_Refresh();
+  }
   if (errorFaceMs && millis() - errorFaceMs > ERROR_FACE_MS) {
     errorFaceMs = 0;
     if (state == State::Idle) showResult(nullptr);
@@ -402,7 +426,7 @@ bool VOICE_ServerVoice(Print &output, const char *name) {
 }
 
 bool VOICE_IsBusy() {
-  return state != State::Idle || errorFaceMs;
+  return state != State::Idle || errorFaceMs || displayHeld;
 }
 
 bool VOICE_ServerOk() {

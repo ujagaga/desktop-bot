@@ -49,7 +49,14 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.voice_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.voice_dir.cleanup)
         self.voice_file = os.path.join(self.voice_dir.name, 'voice.json')
-        self.app = conversation.create_app(self.config, str(self.fake.make_url('/live')), self.voice_file)
+        with open(os.path.join(self.voice_dir.name, 'hello.py'), 'w') as f:
+            f.write("DESCRIPTION = 'Greeting'\ndef run():\n    return 'Hi there'\n")
+        with open(os.path.join(self.voice_dir.name, 'show.py'), 'w') as f:
+            f.write("DESCRIPTION = 'Shows'\ndef run():\n    return {'say': '14:32', 'clock': '14:32', 'seconds': 5}\n")
+        with open(os.path.join(self.voice_dir.name, 'broken.py'), 'w') as f:
+            f.write("DESCRIPTION = 'Fails'\ndef run():\n    raise OSError('secret')\n")
+        self.app = conversation.create_app(self.config, str(self.fake.make_url('/live')), self.voice_file,
+                                           self.voice_dir.name)
         self.client = TestClient(TestServer(self.app))
         await self.client.start_server()
         self.headers = {'X-API-Key': 'device-secret'}
@@ -126,6 +133,23 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         await ws.close()
         reloaded = conversation.create_app(dict(self.config, voice=''), voice_file=self.voice_file)
         self.assertEqual(reloaded[conversation.CONFIG]['voice'], 'Puck')
+
+    async def test_commands_are_declared_and_run(self):
+        ws = await self.connect()
+        declared = self.setup['setup']['tools'][0]['functionDeclarations']
+        self.assertEqual([d['name'] for d in declared], ['broken', 'hello', 'show'])
+        await self.provider.send_json({'toolCall': {'functionCalls': [
+            {'id': '1', 'name': 'hello', 'args': {}}, {'id': '2', 'name': 'broken'}, {'id': '3', 'name': 'nope'}]}})
+        responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
+        self.assertEqual(responses, [
+            {'id': '1', 'name': 'hello', 'response': {'result': 'Hi there'}},
+            {'id': '2', 'name': 'broken', 'response': {'error': 'Command failed.'}},
+            {'id': '3', 'name': 'nope', 'response': {'error': 'Unknown command.'}}])
+        await self.provider.send_json({'toolCall': {'functionCalls': [{'id': '4', 'name': 'show'}]}})
+        self.assertEqual(await ws.receive_json(timeout=2), {'type': 'display', 'clock': '14:32', 'seconds': 5})
+        responses = (await asyncio.wait_for(self.messages.get(), 2))['toolResponse']['functionResponses']
+        self.assertEqual(responses[0]['response'], {'result': '14:32'})
+        await ws.close()
 
     async def test_snapshot_is_recognized_locally(self):
         ws = await self.connect()
