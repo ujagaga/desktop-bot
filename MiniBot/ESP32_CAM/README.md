@@ -156,8 +156,9 @@ Set the gateway base URL (for example `https://face.ujagaga.in.rs`) and the
 device API key in the **Voice gateway** section of the UI; they are saved in
 Preferences (`camGateway`). When a voice session starts, the S3 sends
 `snapshot <session>` over UART; CAM replies `OK` (or `ERR snapshot <session>`),
-then its main loop captures one frame and POSTs it to `<url>/snapshot?session=<id>`
-for face recognition. The result is logged as `Gateway: snapshot ... HTTP <status>`.
+then its main loop captures one frame and sends it for face recognition: over the
+drive link below when it is connected (a second TLS connection does not fit in
+heap beside it), otherwise as a POST to `<url>/snapshot?session=<id>`. The result is logged as `Gateway: snapshot ... HTTP <status>`.
 
 With the same settings, CAM keeps a WebSocket to `<url>/robot/camera` for the
 server's drive page: while the page is open it sends a JPEG frame about every

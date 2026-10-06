@@ -164,6 +164,19 @@ void GATEWAY_process() {
     LOG_append("Gateway: snapshot skipped; gateway not configured or Wi-Fi offline");
     return;
   }
+  // A second TLS connection does not fit in heap beside the drive link: send it over the link.
+  if (driveLink.isConnected()) {
+    camera_fb_t *frame = CAM_Capture();
+    if (!frame) {
+      LOG_append("Gateway: snapshot capture failed");
+      return;
+    }
+    String header = String("{\"type\":\"snapshot\",\"session\":\"") + session + "\"}";
+    bool sent = driveLink.sendTXT(header) && driveLink.sendBIN(frame->buf, frame->len);
+    LOG_printf("Gateway: snapshot %u bytes over drive link%s", (unsigned)frame->len, sent ? "" : " failed");
+    CAM_Dispose(frame);
+    return;
+  }
   // Copy the frame so the camera is free for the stream during the upload.
   camera_fb_t *frame = CAM_Capture();
   if (!frame) {

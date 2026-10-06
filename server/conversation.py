@@ -397,7 +397,10 @@ async def drive_status(state):
 
 
 async def camera_link(request):
-    """The robot CAM's persistent link: JPEG frames in while asked, drive commands out."""
+    """The robot CAM's persistent link: JPEG frames in while asked, drive commands out.
+
+    {"type": "snapshot", "session": id} marks the next binary frame as that voice session's snapshot.
+    """
     if not authorized(request):
         return web.json_response({'error': 'invalid or missing API key'}, status=401)
     ws = web.WebSocketResponse(max_msg_size=MAX_MESSAGE, heartbeat=30)
@@ -409,8 +412,22 @@ async def camera_link(request):
     try:
         await ws.send_json({'type': 'stream', 'on': bool(state['viewers'])})
         await drive_status(state)
+        snapshot_session = None
         async for message in ws:
-            if message.type == aiohttp.WSMsgType.BINARY:
+            if message.type == aiohttp.WSMsgType.TEXT:
+                with contextlib.suppress(ValueError, AttributeError):
+                    data = json.loads(message.data)
+                    if data.get('type') == 'snapshot':
+                        snapshot_session = str(data.get('session'))
+            elif message.type == aiohttp.WSMsgType.BINARY and snapshot_session:
+                target = request.app[SNAPSHOT_TARGETS].get(snapshot_session)
+                snapshot_session = None
+                if target:
+                    try:
+                        await observe(message.data, *target, request.app[CONFIG])
+                    except ValueError as error:
+                        logger.warning('Camera snapshot failed: %s', error)
+            elif message.type == aiohttp.WSMsgType.BINARY:
                 for viewer in list(state['viewers']):
                     with contextlib.suppress(ConnectionResetError):  # a closing browser tab
                         await viewer.send_bytes(message.data)

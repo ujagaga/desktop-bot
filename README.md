@@ -240,7 +240,8 @@ and `POST /voice` with `{"voice": "<name>"}` (or `""` for the default) saves a
 choice in `server/voice.json` that overrides it. Both require `X-API-Key`.
 
 The `ready` message carries a `session` id; `POST /snapshot?session=<id>` with
-`X-API-Key` and a raw JPEG body (the robot's camera uses it) runs face recognition
+`X-API-Key` and a raw JPEG body (the robot's camera falls back to it; normally it
+sends `{"type":"snapshot"}` plus the JPEG over its `/robot/camera` link) runs face recognition
 for that session, like a WebSocket `snapshot`. The result stays on the gateway:
 Gemini asks for it with the built-in `people_present` tool only when needed. Asked "who am I?",
 it says the recognized name or that it does not know.

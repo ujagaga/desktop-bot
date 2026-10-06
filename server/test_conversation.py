@@ -217,6 +217,17 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await camera.receive_json(timeout=2), {'type': 'stream', 'on': False})
         await camera.close()
 
+    async def test_snapshot_over_camera_link(self):
+        ws = await self.client.ws_connect('/conversation', headers=self.headers)
+        session = (await ws.receive_json(timeout=2))['session']
+        camera = await self.client.ws_connect('/robot/camera', headers=self.headers)
+        await camera.receive_json(timeout=2)
+        await camera.send_json({'type': 'snapshot', 'session': session})
+        await camera.send_bytes(b'jpeg')
+        self.assertEqual((await ws.receive_json(timeout=2))['names'], ['Alice'])
+        await camera.close()
+        await ws.close()
+
     async def test_invalid_messages_capacity_and_stop(self):
         ws = await self.connect()
         response = await self.client.get('/conversation', headers=self.headers)
