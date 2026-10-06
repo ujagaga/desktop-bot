@@ -8,6 +8,7 @@
 #include <freertos/semphr.h>
 #include "camera.h"
 #include "comms.h"
+#include "http_client.h"
 #include "logger.h"
 
 extern const uint8_t bundleStart[] asm("_binary_x509_crt_bundle_start");
@@ -69,12 +70,13 @@ static void processLink() {
   String base = baseUrl, key = apiKey;
   uint32_t version = configVersion;
   xSemaphoreGive(mutex);
-  if (linkStarted && version != linkVersion) {
+  // Two TLS connections do not fit in heap: drop the link while a firmware check is due.
+  if (linkStarted && (version != linkVersion || HTTPC_checkPending())) {
     driveLink.disconnect();
     linkStarted = streaming = false;
   }
   if (!linkStarted) {
-    if (!base.length() || !key.length() || WiFi.status() != WL_CONNECTED) return;
+    if (!base.length() || !key.length() || WiFi.status() != WL_CONNECTED || HTTPC_checkPending()) return;
     linkStarted = startLink(base, key);
     linkVersion = version;
     return;

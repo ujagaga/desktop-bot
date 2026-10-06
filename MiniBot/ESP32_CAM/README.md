@@ -164,6 +164,8 @@ server's drive page: while the page is open it sends a JPEG frame about every
 100 ms, and it forwards `{"type":"drive"}` messages to the S3 over UART as
 `drive <f|b|l|r> <pwm>` or `drive s`. Messages that queued up during a frame
 upload are read together and only the newest is sent, so commands never lag.
+The link is closed while a firmware check is pending: two TLS connections do
+not fit in the CAM's heap.
 
 Wi-Fi POST example:
 
