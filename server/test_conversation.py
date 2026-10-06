@@ -1,8 +1,11 @@
 """Gateway integration checks against local fake Gemini and recognition servers."""
 import asyncio
 import base64
+import hashlib
+import hmac
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -176,6 +179,29 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         await ws.close()
         await asyncio.sleep(0.1)
         self.assertEqual(self.app[conversation.SNAPSHOT_TARGETS], {})
+
+    async def test_drive_relay(self):
+        def token(expiry):
+            signature = hmac.new(b'device-secret', f'drive:{expiry}'.encode(), hashlib.sha256).hexdigest()
+            return f'{expiry}.{signature}'
+        for bad in ['', token(int(time.time()) - 1), token(int(time.time()) + 60)[:-1] + 'x']:
+            response = await self.client.get('/robot/drive', params={'token': bad})
+            self.assertEqual(response.status, 401)
+        self.assertEqual((await self.client.get('/robot/camera')).status, 401)
+        camera = await self.client.ws_connect('/robot/camera', headers=self.headers)
+        self.assertEqual(await camera.receive_json(timeout=2), {'type': 'stream', 'on': False})
+        viewer = await self.client.ws_connect('/robot/drive', params={'token': token(int(time.time()) + 60)})
+        self.assertEqual(await viewer.receive_json(timeout=2), {'type': 'status', 'camera': True})
+        self.assertEqual(await camera.receive_json(timeout=2), {'type': 'stream', 'on': True})
+        await camera.send_bytes(b'jpeg')
+        self.assertEqual((await viewer.receive(timeout=2)).data, b'jpeg')
+        for bad in ['{"dir":"x","speed":50}', '{"dir":"f","speed":101}', '{"dir":"f","speed":true}', 'nope']:
+            await viewer.send_str(bad)
+        await viewer.send_json({'dir': 'l', 'speed': 60})
+        self.assertEqual(await camera.receive_json(timeout=2), {'type': 'drive', 'dir': 'l', 'speed': 60})
+        await viewer.close()
+        self.assertEqual(await camera.receive_json(timeout=2), {'type': 'stream', 'on': False})
+        await camera.close()
 
     async def test_invalid_messages_capacity_and_stop(self):
         ws = await self.connect()

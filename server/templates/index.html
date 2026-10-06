@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <header class="page-header"><div><span class="eyebrow">YOUR LIBRARY</span><h1>Known faces<span class="heading-dot">.</span></h1><p class="muted">The people you know. Ready for the next hello.</p></div><form action="{{ url_for('logout') }}" method="post">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="secondary" type="submit">Log out <span aria-hidden="true">↗</span></button>
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><a class="secondary" href="{{ url_for('drive') }}">Drive the robot</a> <button class="secondary" type="submit">Log out <span aria-hidden="true">↗</span></button>
 </form></header>
 <div class="library-summary"><span><strong>{{ people|length }}</strong> {{ 'person' if people|length == 1 else 'people' }} in your library</span><span><strong>{{ people|sum(attribute='photos') }}</strong> reference photos</span><a href="#add-face">Add a face <span aria-hidden="true">↗</span></a></div>
 <div class="face-layout"><div class="face-management">

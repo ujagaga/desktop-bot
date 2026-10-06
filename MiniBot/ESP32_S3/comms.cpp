@@ -29,6 +29,8 @@
 #define GPIO_UART_TX 13
 #define MAX_LINE_LEN 128
 #define MOTOR_ROTATE_TIMEOUT_MS 3000UL
+// A drive pulse; the drive page repeats it every 100 ms while a button is held.
+#define DRIVE_PULSE_MS 300UL
 #define MOTOR_ROTATE_OVERSHOOT_DEGREES 2.0f
 #define MOTOR_AUTO_CALIBRATION_PWM_PERCENT 30
 #define MOTOR_AUTO_CALIBRATION_MAX_SECONDS 60UL
@@ -294,6 +296,25 @@ static bool cmdMotorMove(Print *output, const char *args) {
   } else {
     MOTOR_Run(motorId, forward, pwmPercent, durationMs);
   }
+  return true;
+}
+
+// drive <f|b|l|r> <pwm>: both motors for one short pulse; left is the positive rotate direction.
+static bool cmdDrive(Print *output, const char *args) {
+  char direction;
+  int pwmPercent;
+  if (sscanf(args, " %c %d", &direction, &pwmPercent) != 2 || !strchr("fblr", direction) ||
+      pwmPercent < 0 || pwmPercent > 100) {
+    output->println("ERR drive <f|b|l|r> <pwm>");
+    return false;
+  }
+  bool motor1Forward = direction == 'f', motor2Forward = direction == 'f';
+  if (direction == 'l' || direction == 'r') {
+    motor1Forward = (direction == 'l') == MOTOR_ROTATE_MOTOR1_FORWARD;
+    motor2Forward = (direction == 'l') == MOTOR_ROTATE_MOTOR2_FORWARD;
+  }
+  MOTOR_Run(1, motor1Forward, pwmPercent, DRIVE_PULSE_MS);
+  MOTOR_Run(2, motor2Forward, pwmPercent, DRIVE_PULSE_MS);
   return true;
 }
 
@@ -639,6 +660,7 @@ static bool cmdHelp(Print *output, const char *args) {
   output->println("  batt v");
   output->println("  batt chg");
   output->println("  ww");
+  output->println("  drive <f|b|l|r> <pwm> (300 ms pulse)");
   output->println("  voice [start|stop|url <url>|key <key>|name <voice>]");
   output->println("  gyro angle <x|y|z|0|1|2>");
   output->println("  gyro calibrate");
@@ -823,6 +845,7 @@ static const CommandEntry commandMap[] = {
   { "help", cmdHelp },
   { "audio", cmdAudio },
   { "cam", cmdCam },
+  { "drive", cmdDrive },
   { "ota", cmdOTA },
   { "bat", cmdBattery },
   { "batt", cmdBattery },

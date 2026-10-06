@@ -159,6 +159,11 @@ Preferences (`camGateway`). When a voice session starts, the S3 sends
 then its main loop captures one frame and POSTs it to `<url>/snapshot?session=<id>`
 for face recognition. The result is logged as `Gateway: snapshot ... HTTP <status>`.
 
+With the same settings, CAM keeps a WebSocket to `<url>/robot/camera` for the
+server's drive page: while the page is open it sends a JPEG frame about every
+100 ms, and it forwards `{"type":"drive"}` messages to the S3 over UART as
+`drive <f|b|l|r> <pwm>`.
+
 Wi-Fi POST example:
 
 ```json

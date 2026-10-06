@@ -3,9 +3,11 @@
 #include <HTTPClient.h>
 #include <NetworkClientSecure.h>
 #include <Preferences.h>
+#include <WebSocketsClient.h>
 #include <WiFi.h>
 #include <freertos/semphr.h>
 #include "camera.h"
+#include "comms.h"
 #include "logger.h"
 
 extern const uint8_t bundleStart[] asm("_binary_x509_crt_bundle_start");
@@ -15,6 +17,73 @@ static SemaphoreHandle_t mutex = nullptr;
 static String baseUrl, apiKey;
 static portMUX_TYPE sessionMux = portMUX_INITIALIZER_UNLOCKED;
 static char pendingSession[33] = "";
+
+// Persistent link for the server's drive page: frames out while asked, drive commands in.
+static WebSocketsClient driveLink;
+static bool linkStarted = false, streaming = false;
+static uint32_t configVersion = 0, linkVersion = 0;
+static unsigned long lastFrameMs = 0;
+static constexpr unsigned long FRAME_INTERVAL_MS = 100;
+
+static void onLinkEvent(WStype_t type, uint8_t *payload, size_t length) {
+  if (type == WStype_DISCONNECTED) streaming = false;
+  if (type == WStype_CONNECTED) LOG_append("Gateway: drive link connected");
+  if (type != WStype_TEXT) return;
+  JsonDocument doc;
+  if (deserializeJson(doc, payload, length)) return;
+  const char *kind = doc["type"] | "";
+  if (!strcmp(kind, "stream")) {
+    streaming = doc["on"] | false;
+  } else if (!strcmp(kind, "drive")) {
+    const char *dir = doc["dir"] | "";
+    int speed = doc["speed"] | -1;
+    if (strlen(dir) != 1 || !strchr("fblr", dir[0]) || speed < 0 || speed > 100) return;
+    char command[24];
+    snprintf(command, sizeof(command), "drive %c %d", dir[0], speed);
+    COMMS_SendCommand(command);  // Queue full: dropped; the page repeats every 100 ms.
+  }
+}
+
+// https://host[:port] -> host, port; http:// is plain.
+static bool startLink(const String &base, const String &key) {
+  bool secure = base.startsWith("https://");
+  String rest = base.substring(secure ? 8 : 7);
+  int colon = rest.indexOf(':');
+  String host = colon < 0 ? rest : rest.substring(0, colon);
+  uint16_t port = colon < 0 ? (secure ? 443 : 80) : rest.substring(colon + 1).toInt();
+  if (!host.length() || !port) return false;
+  driveLink.onEvent(onLinkEvent);
+  driveLink.setExtraHeaders(("X-API-Key: " + key).c_str());
+  driveLink.setReconnectInterval(5000);
+  driveLink.enableHeartbeat(30000, 10000, 2);
+  if (secure) driveLink.beginSslWithBundle(host.c_str(), port, "/robot/camera", bundleStart, bundleEnd - bundleStart, "");
+  else driveLink.begin(host.c_str(), port, "/robot/camera", "");
+  return true;
+}
+
+static void processLink() {
+  xSemaphoreTake(mutex, portMAX_DELAY);
+  String base = baseUrl, key = apiKey;
+  uint32_t version = configVersion;
+  xSemaphoreGive(mutex);
+  if (linkStarted && version != linkVersion) {
+    driveLink.disconnect();
+    linkStarted = streaming = false;
+  }
+  if (!linkStarted) {
+    if (!base.length() || !key.length() || WiFi.status() != WL_CONNECTED) return;
+    linkStarted = startLink(base, key);
+    linkVersion = version;
+    return;
+  }
+  driveLink.loop();
+  if (!streaming || !driveLink.isConnected() || millis() - lastFrameMs < FRAME_INTERVAL_MS) return;
+  lastFrameMs = millis();
+  camera_fb_t *frame = CAM_Capture();
+  if (!frame) return;
+  driveLink.sendBIN(frame->buf, frame->len);
+  CAM_Dispose(frame);
+}
 
 void GATEWAY_init() {
   mutex = xSemaphoreCreateMutex();
@@ -40,6 +109,7 @@ bool GATEWAY_configure(const String &url, const String &key) {
   xSemaphoreTake(mutex, portMAX_DELAY);
   baseUrl = base;
   if (key.length()) apiKey = key;
+  ++configVersion;
   xSemaphoreGive(mutex);
   LOG_append("Gateway: settings saved");
   return true;
@@ -67,6 +137,7 @@ bool GATEWAY_requestSnapshot(const char *session) {
 }
 
 void GATEWAY_process() {
+  processLink();
   char session[sizeof(pendingSession)];
   portENTER_CRITICAL(&sessionMux);
   strcpy(session, pendingSession);

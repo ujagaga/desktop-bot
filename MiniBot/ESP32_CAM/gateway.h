@@ -3,6 +3,7 @@
 // Voice gateway link (server/conversation.py): the S3 asks over UART for a frame,
 // and the main loop POSTs it to <url>/snapshot?session=<id> for face recognition.
 void GATEWAY_init();
+// Also keeps the drive link (/robot/camera): JPEG frames while the drive page asks, drive commands to the S3.
 void GATEWAY_process();
 // Base URL such as https://face.ujagaga.in.rs; an empty key keeps the saved one.
 bool GATEWAY_configure(const String &url, const String &key);

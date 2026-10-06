@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Drive{% endblock %}
+{% block content %}
+<style>
+.drive-layout { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 24px; align-items: start; margin-top: 30px; }
+.drive-view { aspect-ratio: 4 / 3; display: grid; place-items: center; background: #111820; color: #bac5d1; }
+.drive-view img { width: 100%; height: 100%; object-fit: contain; }
+.drive-controls { padding: 24px; display: grid; gap: 22px; }
+.drive-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; touch-action: none; user-select: none; -webkit-user-select: none; }
+.drive-pad button { aspect-ratio: 1; font-size: 28px; background: #e7eddf; color: var(--ink); }
+.drive-pad button.active { background: var(--green); color: white; }
+.drive-pad .up { grid-column: 2; } .drive-pad .left { grid-column: 1; } .drive-pad .right { grid-column: 3; } .drive-pad .down { grid-column: 2; }
+.drive-speed { display: grid; gap: 6px; } .drive-speed input { width: 100%; }
+@media (max-width: 760px) { .drive-layout { grid-template-columns: 1fr; } }
+</style>
+<header class="page-header"><div><span class="eyebrow">ROBOT</span><h1>Drive<span class="heading-dot">.</span></h1><p class="muted" id="drive-status">Connecting…</p></div><a class="secondary" href="{{ url_for('index') }}">Known faces</a></header>
+<div class="drive-layout">
+<section class="panel drive-view"><img id="drive-image" alt="Robot camera" hidden><span id="drive-placeholder">Waiting for the camera…</span></section>
+<section class="panel drive-controls" aria-label="Drive controls">
+<div class="drive-pad">
+<button type="button" class="up" data-dir="f" aria-label="Forward">▲</button>
+<button type="button" class="left" data-dir="l" aria-label="Rotate left">⟲</button>
+<button type="button" class="right" data-dir="r" aria-label="Rotate right">⟳</button>
+<button type="button" class="down" data-dir="b" aria-label="Back">▼</button>
+</div>
+<label class="drive-speed">Speed <span><strong id="drive-speed-value">60</strong>%</span><input id="drive-speed" type="range" min="30" max="100" value="60"></label>
+<small>Hold a button to drive; the robot stops within 0.3 s of letting go.</small>
+</section></div>
+<script>
+const $ = id => document.getElementById(id);
+let token = {{ token|tojson }}, socket = null, held = null, timer = null, frameUrl = null;
+$('drive-speed').oninput = () => { $('drive-speed-value').textContent = $('drive-speed').value; };
+function send() {
+  if (held && socket && socket.readyState === WebSocket.OPEN)
+    socket.send(JSON.stringify({dir: held.dataset.dir, speed: Number($('drive-speed').value)}));
+}
+function release() {
+  if (held) held.classList.remove('active');
+  held = null; clearInterval(timer); timer = null;
+}
+for (const button of document.querySelectorAll('.drive-pad button')) {
+  button.addEventListener('pointerdown', event => {
+    release(); held = button; button.classList.add('active');
+    button.setPointerCapture(event.pointerId); send(); timer = setInterval(send, 100);
+  });
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) button.addEventListener(type, release);
+  button.addEventListener('contextmenu', event => event.preventDefault());
+}
+window.addEventListener('blur', release);
+document.addEventListener('visibilitychange', () => { if (document.hidden) release(); });
+function connect() {
+  socket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host +
+                         '/robot/drive?token=' + encodeURIComponent(token));
+  socket.binaryType = 'blob';
+  socket.onmessage = event => {
+    if (typeof event.data !== 'string') {
+      if (frameUrl) URL.revokeObjectURL(frameUrl);
+      frameUrl = URL.createObjectURL(event.data);
+      $('drive-image').src = frameUrl; $('drive-image').hidden = false; $('drive-placeholder').hidden = true;
+      return;
+    }
+    const message = JSON.parse(event.data);
+    if (message.type === 'status') {
+      $('drive-status').textContent = message.camera ? 'Robot connected.' : 'Robot offline (asleep, or CAM gateway not set).';
+      if (!message.camera) { $('drive-image').hidden = true; $('drive-placeholder').hidden = false; }
+    }
+  };
+  socket.onclose = () => {
+    release(); $('drive-status').textContent = 'Disconnected; reconnecting…';
+    setTimeout(async () => {
+      try { token = (await (await fetch('{{ url_for("drive_token_refresh") }}')).json()).token; } catch (e) {}
+      connect();
+    }, 2000);
+  };
+}
+connect();
+</script>
+{% endblock %}

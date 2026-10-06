@@ -6,14 +6,18 @@ Pipeline: YuNet detect -> 5-point align -> SFace embed -> cosine match.
 Known faces live in faces/<name>/*.jpg and are all matched together.
 
 GET  /          Google-login-protected face list and upload form
+GET  /drive     Google-login-protected robot drive page (camera + hold-to-drive buttons)
 POST /recognize API key + image (raw body or multipart) -> recognized names
 POST /enroll    API key or login session + CSRF token, image + name -> enrollment
 """
 
+import hashlib
+import hmac
 import io
 import json
 import pathlib
 import re
+import time
 from functools import wraps
 from hmac import compare_digest
 from uuid import uuid4
@@ -209,6 +213,25 @@ def logout():
 def index():
     people = list_people(FACES, KNOWN_FACES)
     return render_template("index.html", people=people)
+
+
+def drive_token():
+    """Short-lived token for the gateway's /robot/drive WebSocket (checked in conversation.py)."""
+    expiry = int(time.time()) + 60
+    signature = hmac.new(appsettings.API_KEY.encode(), f"drive:{expiry}".encode(), hashlib.sha256).hexdigest()
+    return f"{expiry}.{signature}"
+
+
+@app.get("/drive")
+@login_required
+def drive():
+    return render_template("drive.html", token=drive_token())
+
+
+@app.get("/drive/token")
+@login_required
+def drive_token_refresh():
+    return jsonify(token=drive_token())
 
 
 @app.get("/photos/<name>/<filename>")

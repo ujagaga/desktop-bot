@@ -4,12 +4,16 @@
 import asyncio
 import base64
 import binascii
+import contextlib
 import glob
+import hashlib
+import hmac
 import importlib.util
 import json
 import logging
 import os
 import secrets
+import time
 from datetime import datetime, timezone
 from hmac import compare_digest
 
@@ -36,6 +40,8 @@ VOICE_FILE = web.AppKey('voice_file', str)
 COMMANDS = web.AppKey('commands', dict)
 # Session id -> (device, seen, http) so the robot's camera can POST /snapshot into it.
 SNAPSHOT_TARGETS = web.AppKey('snapshot_targets', dict)
+# Drive page relay: {'camera': robot CAM WebSocket or None, 'viewers': set of browser WebSockets}.
+DRIVE = web.AppKey('drive', dict)
 
 
 def settings():
@@ -346,8 +352,80 @@ async def snapshot(request):
     return web.json_response({'names': names})
 
 
+def drive_token_valid(token, api_key, now=None):
+    """Token from the server UI's /drive page: '<expiry>.<HMAC-SHA256(API_KEY, drive:<expiry>)>'."""
+    expiry, _, signature = token.partition('.')
+    if not expiry.isdigit() or int(expiry) < (now or time.time()):
+        return False
+    expected = hmac.new(api_key.encode(), f'drive:{expiry}'.encode(), hashlib.sha256).hexdigest()
+    return compare_digest(signature.encode(), expected.encode())
+
+
+async def drive_status(state):
+    for viewer in list(state['viewers']):
+        with contextlib.suppress(ConnectionResetError):  # a closing browser tab
+            await viewer.send_json({'type': 'status', 'camera': state['camera'] is not None})
+
+
+async def camera_link(request):
+    """The robot CAM's persistent link: JPEG frames in while asked, drive commands out."""
+    if not authorized(request):
+        return web.json_response({'error': 'invalid or missing API key'}, status=401)
+    ws = web.WebSocketResponse(max_msg_size=MAX_MESSAGE, heartbeat=30)
+    await ws.prepare(request)
+    state = request.app[DRIVE]
+    previous, state['camera'] = state['camera'], ws
+    if previous:
+        await previous.close()
+    try:
+        await ws.send_json({'type': 'stream', 'on': bool(state['viewers'])})
+        await drive_status(state)
+        async for message in ws:
+            if message.type == aiohttp.WSMsgType.BINARY:
+                for viewer in list(state['viewers']):
+                    with contextlib.suppress(ConnectionResetError):  # a closing browser tab
+                        await viewer.send_bytes(message.data)
+    finally:
+        if state['camera'] is ws:
+            state['camera'] = None
+            await drive_status(state)
+    return ws
+
+
+async def drive_link(request):
+    """Browser drive page: receives frames; sends {"dir": f|b|l|r, "speed": 0-100} every 100 ms while held."""
+    if not drive_token_valid(request.query.get('token', ''), request.app[CONFIG]['api_key']):
+        return web.json_response({'error': 'invalid or expired drive token'}, status=401)
+    ws = web.WebSocketResponse(heartbeat=30)
+    await ws.prepare(request)
+    state = request.app[DRIVE]
+    state['viewers'].add(ws)
+    try:
+        await ws.send_json({'type': 'status', 'camera': state['camera'] is not None})
+        if state['camera'] and len(state['viewers']) == 1:
+            await state['camera'].send_json({'type': 'stream', 'on': True})
+        async for message in ws:
+            if message.type != aiohttp.WSMsgType.TEXT:
+                continue
+            try:
+                data = json.loads(message.data)
+            except ValueError:
+                continue
+            speed = data.get('speed') if isinstance(data, dict) else None
+            if (data.get('dir') in ('f', 'b', 'l', 'r') and type(speed) is int and 0 <= speed <= 100
+                    and state['camera']):
+                await state['camera'].send_json({'type': 'drive', 'dir': data['dir'], 'speed': speed})
+    finally:
+        state['viewers'].discard(ws)
+        if not state['viewers'] and state['camera']:
+            await state['camera'].send_json({'type': 'stream', 'on': False})
+    return ws
+
+
 async def shutdown(app):
-    await asyncio.gather(*(ws.close(code=1001, message=b'Server shutdown') for ws in list(app[SESSIONS])))
+    drive = app[DRIVE]
+    links = list(app[SESSIONS]) + list(drive['viewers']) + ([drive['camera']] if drive['camera'] else [])
+    await asyncio.gather(*(ws.close(code=1001, message=b'Server shutdown') for ws in links))
 
 
 def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None, commands_dir=None):
@@ -364,10 +442,13 @@ def create_app(config=None, gemini_url=GEMINI_URL, voice_file=None, commands_dir
     app[GEMINI_ENDPOINT] = gemini_url
     app[SESSIONS] = set()
     app[SNAPSHOT_TARGETS] = {}
+    app[DRIVE] = {'camera': None, 'viewers': set()}
     app.router.add_get('/health', health)
     app.router.add_get('/conversation', conversation)
     app.router.add_route('*', '/voice', voice)
     app.router.add_post('/snapshot', snapshot)
+    app.router.add_get('/robot/camera', camera_link)
+    app.router.add_get('/robot/drive', drive_link)
     app.on_shutdown.append(shutdown)
     return app
 
