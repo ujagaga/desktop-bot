@@ -162,7 +162,8 @@ for face recognition. The result is logged as `Gateway: snapshot ... HTTP <statu
 With the same settings, CAM keeps a WebSocket to `<url>/robot/camera` for the
 server's drive page: while the page is open it sends a JPEG frame about every
 100 ms, and it forwards `{"type":"drive"}` messages to the S3 over UART as
-`drive <f|b|l|r> <pwm>`.
+`drive <f|b|l|r> <pwm>` or `drive s`. Messages that queued up during a frame
+upload are read together and only the newest is sent, so commands never lag.
 
 Wi-Fi POST example:
 

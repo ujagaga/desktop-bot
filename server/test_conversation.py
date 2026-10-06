@@ -199,6 +199,8 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             await viewer.send_str(bad)
         await viewer.send_json({'dir': 'l', 'speed': 60})
         self.assertEqual(await camera.receive_json(timeout=2), {'type': 'drive', 'dir': 'l', 'speed': 60})
+        await viewer.send_json({'dir': 's', 'speed': 0})
+        self.assertEqual(await camera.receive_json(timeout=2), {'type': 'drive', 'dir': 's', 'speed': 0})
         await viewer.close()
         self.assertEqual(await camera.receive_json(timeout=2), {'type': 'stream', 'on': False})
         await camera.close()

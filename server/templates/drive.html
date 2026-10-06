@@ -24,7 +24,7 @@
 <button type="button" class="down" data-dir="b" aria-label="Back">▼</button>
 </div>
 <label class="drive-speed">Speed <span><strong id="drive-speed-value">60</strong>%</span><input id="drive-speed" type="range" min="30" max="100" value="60"></label>
-<small>Hold a button to drive; the robot stops within 0.3 s of letting go.</small>
+<small>Hold a button to drive; letting go stops the robot.</small>
 </section></div>
 <script>
 const $ = id => document.getElementById(id);
@@ -35,8 +35,10 @@ function send() {
     socket.send(JSON.stringify({dir: held.dataset.dir, speed: Number($('drive-speed').value)}));
 }
 function release() {
-  if (held) held.classList.remove('active');
+  if (!held) return;
+  held.classList.remove('active');
   held = null; clearInterval(timer); timer = null;
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({dir: 's', speed: 0}));
 }
 for (const button of document.querySelectorAll('.drive-pad button')) {
   button.addEventListener('pointerdown', event => {

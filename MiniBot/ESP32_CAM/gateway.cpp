@@ -23,12 +23,16 @@ static WebSocketsClient driveLink;
 static bool linkStarted = false, streaming = false;
 static uint32_t configVersion = 0, linkVersion = 0;
 static unsigned long lastFrameMs = 0;
+// Newest drive command from this loop pass; older ones queued behind a frame upload are dropped.
+static char driveCommand[24] = "";
+static bool linkMessage = false;
 static constexpr unsigned long FRAME_INTERVAL_MS = 100;
 
 static void onLinkEvent(WStype_t type, uint8_t *payload, size_t length) {
   if (type == WStype_DISCONNECTED) streaming = false;
   if (type == WStype_CONNECTED) LOG_append("Gateway: drive link connected");
   if (type != WStype_TEXT) return;
+  linkMessage = true;
   JsonDocument doc;
   if (deserializeJson(doc, payload, length)) return;
   const char *kind = doc["type"] | "";
@@ -37,10 +41,9 @@ static void onLinkEvent(WStype_t type, uint8_t *payload, size_t length) {
   } else if (!strcmp(kind, "drive")) {
     const char *dir = doc["dir"] | "";
     int speed = doc["speed"] | -1;
-    if (strlen(dir) != 1 || !strchr("fblr", dir[0]) || speed < 0 || speed > 100) return;
-    char command[24];
-    snprintf(command, sizeof(command), "drive %c %d", dir[0], speed);
-    COMMS_SendCommand(command);  // Queue full: dropped; the page repeats every 100 ms.
+    if (strlen(dir) != 1 || !strchr("fblrs", dir[0]) || speed < 0 || speed > 100) return;
+    if (dir[0] == 's') strcpy(driveCommand, "drive s");
+    else snprintf(driveCommand, sizeof(driveCommand), "drive %c %d", dir[0], speed);
   }
 }
 
@@ -76,7 +79,13 @@ static void processLink() {
     linkVersion = version;
     return;
   }
-  driveLink.loop();
+  // A frame upload blocks for a while; read everything that queued up meanwhile.
+  for (int i = 0; i < 32; ++i) {
+    linkMessage = false;
+    driveLink.loop();
+    if (!linkMessage) break;
+  }
+  if (driveCommand[0] && COMMS_SendCommand(driveCommand)) driveCommand[0] = 0;
   if (!streaming || !driveLink.isConnected() || millis() - lastFrameMs < FRAME_INTERVAL_MS) return;
   lastFrameMs = millis();
   camera_fb_t *frame = CAM_Capture();

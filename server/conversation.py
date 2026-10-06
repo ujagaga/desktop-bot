@@ -393,7 +393,7 @@ async def camera_link(request):
 
 
 async def drive_link(request):
-    """Browser drive page: receives frames; sends {"dir": f|b|l|r, "speed": 0-100} every 100 ms while held."""
+    """Browser drive page: receives frames; sends {"dir": f|b|l|r, "speed": 0-100} every 100 ms while held, s on release."""
     if not drive_token_valid(request.query.get('token', ''), request.app[CONFIG]['api_key']):
         return web.json_response({'error': 'invalid or expired drive token'}, status=401)
     ws = web.WebSocketResponse(heartbeat=30)
@@ -412,7 +412,7 @@ async def drive_link(request):
             except ValueError:
                 continue
             speed = data.get('speed') if isinstance(data, dict) else None
-            if (data.get('dir') in ('f', 'b', 'l', 'r') and type(speed) is int and 0 <= speed <= 100
+            if (data.get('dir') in ('f', 'b', 'l', 'r', 's') and type(speed) is int and 0 <= speed <= 100
                     and state['camera']):
                 await state['camera'].send_json({'type': 'drive', 'dir': data['dir'], 'speed': speed})
     finally:

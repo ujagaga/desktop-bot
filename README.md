@@ -250,8 +250,8 @@ WebSocket to the gateway (`/robot/camera`, `X-API-Key`); the page connects to
 `/robot/drive` with a 60 s token signed with `API_KEY`. While a page is open the
 CAM pushes JPEG frames (about 10 fps) and the gateway relays them. Each held
 button sends a drive command every 100 ms; the CAM passes it to the S3 over UART
-as `drive <f|b|l|r> <pwm>`, a 300 ms motor pulse, so releasing the button or
-losing the connection stops the robot. Nginx must route `/robot/` to port 8041
+as `drive <f|b|l|r> <pwm>`, a 500 ms motor pulse. Releasing the button sends
+`drive s` (stop now); if the connection is lost, the last pulse runs out. Nginx must route `/robot/` to port 8041
 with WebSocket upgrade headers.
 
 Each `server/commands/<name>.py` with a `DESCRIPTION` string and a `run()`
