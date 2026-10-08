@@ -19,14 +19,16 @@ read -rp "Serial port for upload [/dev/ttyACM0]: " PORT
 PORT="${PORT:-/dev/ttyACM0}"
 echo "PORT=$PORT" > "$REPO_DIR/.env"
 
-echo "Installing VS Code settings for $BOARD ..."
-mkdir -p "$REPO_DIR/.vscode"
-cp "$SCRIPT_DIR/vscode_$BOARD"/*.json "$REPO_DIR/.vscode/"
-sed -i "s#\"port\": \"\"#\"port\": \"$PORT\"#" "$REPO_DIR/.vscode/arduino.json"
+if [ -d "$SCRIPT_DIR/vscode_$BOARD" ]; then
+  echo "Installing VS Code settings for $BOARD ..."
+  mkdir -p "$REPO_DIR/.vscode"
+  cp "$SCRIPT_DIR/vscode_$BOARD"/*.json "$REPO_DIR/.vscode/"
+  sed -i "s#\"port\": \"\"#\"port\": \"$PORT\"#" "$REPO_DIR/.vscode/arduino.json"
+fi
 
 if ! command -v arduino-cli >/dev/null 2>&1; then
   echo "Installing arduino-cli ..."
-  curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh -s -- -b ~/.local/bin
+  curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR="$HOME/.local/bin" sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
 
