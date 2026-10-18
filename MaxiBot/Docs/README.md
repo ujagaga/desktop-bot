@@ -30,17 +30,17 @@ Wiring follows [Schematic.png](Schematic.png).
 | Speaker data out | IO19 | MAX98357A DIN |
 | Amp enable | IO20 | MAX98357A SD |
 | MPU6050 SCL / SDA / INT | IO15 / IO14 / IO13 | GY-521, AD0 to GND (0x68) |
-| LCD SCL / SDA / RES / DC / CS / BL | IO12 / IO11 / IO10 / IO9 / IO6 / IO5 | ST7789 |
+| LCD SCL / SDA / RES / DC / CS / BL | IO5 / IO6 / IO9 / IO10 / IO11 / IO12 | ST7789 |
 | Tilt servo / Pan servo | IO28 / IO29 | SG90 signal |
 | WROOM EN (reset) | IO22 | EN |
 | SPI MOSI / MISO / SCLK / CS | IO23 / IO34 / IO33 / IO32 | GPIO23 / 19 / 18 / 5 |
 | Handshake / Data ready | IO26 / IO27 | GPIO17 / GPIO16 |
 | Camera | CSI connector | OV5647 (already working as USB UVC webcam) |
 
-Power: MAX98357A, both servos, the LCD and the WROOM run from the common 5 V
-supply. The four INMP441 and the MPU6050 use 3.3 V. Servo current peaks are the
-largest load, so the supply should give at least 2 A, with a bulk capacitor
-near the servos.
+Power: MAX98357A, both servos and the WROOM run from the common 5 V supply.
+The four INMP441, the MPU6050 and the LCD use 3.3 V. Servo current peaks are
+the largest load, so the supply should give at least 2 A, with a bulk
+capacitor near the servos.
 
 Microphones: four INMP441 in a square about 4-6 cm across, facing outward,
 away from the speaker and servos. Each mic has its own 100 nF decoupling
