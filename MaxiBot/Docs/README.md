@@ -36,6 +36,7 @@ Wiring follows [Schematic.png](Schematic.png).
 | SPI MOSI / MISO / SCLK / CS | IO23 / IO34 / IO33 / IO32 | GPIO23 / 19 / 18 / 5 |
 | Handshake / Data ready | IO26 / IO27 | GPIO17 / GPIO16 |
 | Camera | CSI connector | OV5647 (already working as USB UVC webcam) |
+| IR LED / IR receiver | IO30 / IO31 | transistor base (or MOSFET gate) / TSOP38238 OUT |
 
 Power: MAX98357A, both servos and the WROOM run from the common 5 V supply.
 The four INMP441, the MPU6050 and the LCD use 3.3 V. Servo current peaks are
@@ -130,6 +131,55 @@ gyro rate <x|y|z>
 gyro calibrate
 ```
 
+## IR remote
+
+The robot learns buttons from TV and air conditioner remotes and sends them
+again.
+
+Hardware:
+
+- **Receiver**: TSOP38238 (or VS1838B) on 3.3 V, with 100 nF and about
+  100 Ω on VCC. OUT goes to IO31. It removes the 38 kHz carrier, so the robot
+  records only the mark and space timings.
+- **Emitter**: one or two 940 nm LEDs (TSAL6200) in series from 5 V, switched
+  by an NPN transistor (S8050 / 2N2222) or a logic-level MOSFET (AO3400) on
+  IO30. The resistor is chosen for about 100-200 mA pulses. A GPIO alone gives
+  only 1-2 m of range.
+- The LED sits in the head, so the robot can pan toward the device before
+  sending. The receiver faces forward. The casing needs IR windows for both.
+
+Firmware (RMT peripheral):
+
+- **Learn**: RMT RX records raw timings, with no protocol decoding, so any
+  brand works. Air conditioner remotes send their whole state (200-450+
+  pulses, sometimes 2-3 frames with 10-40 ms gaps), so RX uses DMA, and the
+  capture ends only after a gap longer than about 100 ms.
+- **Send**: RMT TX replays the timings with a 38 kHz carrier.
+- One recording is one fixed state. For an air conditioner, "Cool 24 °C, fan
+  auto" and "off" are separate recordings. Setting any temperature would need
+  protocol decoding per brand, which is not planned.
+
+Storage is on the server, not on the robot:
+
+- After `ir learn <name>`, the robot uploads the code with
+  `PUT /ir/<name>` (X-API-Key, JSON: carrier frequency, timings in µs, pan
+  angle). Saving a name again replaces the code.
+- `ir send <name>` downloads the code with `GET /ir/<name>`, pans the head to
+  the saved angle and sends it.
+- A gateway tool (for example "turn on the TV") looks up the name and sends
+  the code to the robot in its device message, so the robot does not make a
+  second request.
+- `GET /ir` lists names; the server UI can list, rename and delete codes.
+
+A code is a few KB of JSON. Without the server the robot cannot send codes.
+
+```text
+ir learn <name>         record the next remote press and upload it
+ir send <name>          download and send
+ir list
+ir delete <name>
+```
+
 ## Gateway changes
 
 - First iteration: MaxiBot uses the existing gateway as is (same
@@ -169,3 +219,6 @@ Each phase ends with something testable on the robot.
    a debug option), snapshot at session start for face recognition, face
    detection driving the head, then object following with a gateway tool.
 10. **OTA.** GitHub firmware check for the P4.
+11. **IR remote.** RMT learn and send, `/ir` server endpoints, `ir ...`
+    commands, then the gateway tool. Needs only phase 1 (and phase 7 for
+    aiming), so it can move earlier.
