@@ -1,9 +1,11 @@
 /*
- * OV5647 CSI camera on WT9932P4-TINY -> MJPEG USB UVC webcam on the
- * High-Speed USB port (HUSB). Frames are captured and JPEG-encoded on
- * demand when the UVC host asks for the next one.
+ * MaxiBot: OV5647 CSI camera on WT9932P4-TINY served over Wi-Fi (ESP32-WROOM
+ * co-processor via ESP-Hosted). As on the ESP32-CAM, port 80 serves /jpg and
+ * the Wi-Fi setup page, port 81 serves the MJPEG /stream, so a running stream
+ * does not block port 80.
  */
 #include <fcntl.h>
+#include <stdlib.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include "esp_err.h"
@@ -15,12 +17,19 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_heap_caps.h"
-#include "usb_device_uvc.h"
+#include "esp_http_server.h"
+#include "esp_console.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include "nvs_flash.h"
+#include "wifi.h"
+#include "lcd.h"
 #include "config.h"
 
 
-static const char *TAG = "uart_cam";
+static const char *TAG = "maxibot";
 
 static int s_fd;
 static uint8_t *s_buffers[BUF_COUNT];
@@ -28,66 +37,121 @@ static jpeg_encoder_handle_t s_jpeg_handle;
 static jpeg_encode_cfg_t s_jpeg_cfg;
 static uint8_t *s_jpeg_outbuf;
 static size_t s_jpeg_outbuf_size;
-static uvc_fb_t s_fb;
+static SemaphoreHandle_t s_cam_lock;
 
-static esp_err_t uvc_start_cb(uvc_format_t format, int width, int height, int rate, void *cb_ctx)
-{
-    ESP_LOGI(TAG, "UVC start %dx%d@%d", width, height, rate);
-    /* STREAMOFF drops all queued buffers, so queue them on every start. */
-    for (int i = 0; i < BUF_COUNT; i++) {
-        struct v4l2_buffer buf = {
-            .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-            .memory = V4L2_MEMORY_MMAP,
-            .index = i,
-        };
-        if (ioctl(s_fd, VIDIOC_QBUF, &buf) != 0) {
-            return ESP_FAIL;
-        }
-    }
-    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    return ioctl(s_fd, VIDIOC_STREAMON, &type) == 0 ? ESP_OK : ESP_FAIL;
-}
-
-static uvc_fb_t *uvc_fb_get_cb(void *cb_ctx)
+/* Dequeues the next frame and JPEG-encodes it into s_jpeg_outbuf.
+ * Caller holds s_cam_lock until it has sent the result. */
+static esp_err_t capture_jpeg(int quality, uint32_t *jpeg_size)
 {
     struct v4l2_buffer buf = {
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP,
     };
     if (ioctl(s_fd, VIDIOC_DQBUF, &buf) != 0) {
-        return NULL;
+        return ESP_FAIL;
     }
-
-    uint32_t jpeg_size = 0;
+    s_jpeg_cfg.image_quality = quality;
     esp_err_t ret = jpeg_encoder_process(s_jpeg_handle, &s_jpeg_cfg, s_buffers[buf.index], buf.bytesused,
-                                         s_jpeg_outbuf, s_jpeg_outbuf_size, &jpeg_size);
+                                         s_jpeg_outbuf, s_jpeg_outbuf_size, jpeg_size);
     ioctl(s_fd, VIDIOC_QBUF, &buf);
-    if (ret != ESP_OK) {
-        return NULL;
+    return ret;
+}
+
+/* JPEG quality from the "q" query parameter (1-100), else JPEG_QUALITY. */
+static int query_quality(httpd_req_t *req)
+{
+    char query[32];
+    char value[8];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "q", value, sizeof(value)) == ESP_OK) {
+        int q = atoi(value);
+        if (q >= 1 && q <= 100) {
+            return q;
+        }
     }
-
-    s_fb.buf = s_jpeg_outbuf;
-    s_fb.len = jpeg_size;
-    s_fb.width = s_jpeg_cfg.width;
-    s_fb.height = s_jpeg_cfg.height;
-    s_fb.format = UVC_FORMAT_JPEG;
-    gettimeofday(&s_fb.timestamp, NULL);
-    return &s_fb;
+    return JPEG_QUALITY;
 }
 
-static void uvc_fb_return_cb(uvc_fb_t *fb, void *cb_ctx)
+static esp_err_t jpg_handler(httpd_req_t *req)
 {
+    int quality = query_quality(req);
+    uint32_t jpeg_size = 0;
+    xSemaphoreTake(s_cam_lock, portMAX_DELAY);
+    /* Without a stream running the queued buffers hold old frames; drop them. */
+    esp_err_t ret = ESP_OK;
+    for (int i = 0; i <= BUF_COUNT && ret == ESP_OK; i++) {
+        ret = capture_jpeg(quality, &jpeg_size);
+    }
+    if (ret == ESP_OK) {
+        httpd_resp_set_type(req, "image/jpeg");
+        ret = httpd_resp_send(req, (const char *)s_jpeg_outbuf, jpeg_size);
+    } else {
+        httpd_resp_send_500(req);
+    }
+    xSemaphoreGive(s_cam_lock);
+    return ret;
 }
 
-static void uvc_stop_cb(void *cb_ctx)
+#define BOUNDARY "frame"
+
+static esp_err_t stream_handler(httpd_req_t *req)
 {
-    ESP_LOGI(TAG, "UVC stop");
-    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ioctl(s_fd, VIDIOC_STREAMOFF, &type);
+    int quality = query_quality(req);
+    httpd_resp_set_type(req, "multipart/x-mixed-replace;boundary=" BOUNDARY);
+    char part[96];
+    esp_err_t ret = ESP_OK;
+    while (ret == ESP_OK) {
+        uint32_t jpeg_size = 0;
+        xSemaphoreTake(s_cam_lock, portMAX_DELAY);
+        ret = capture_jpeg(quality, &jpeg_size);
+        if (ret == ESP_OK) {
+            int len = snprintf(part, sizeof(part),
+                               "\r\n--" BOUNDARY "\r\nContent-Type: image/jpeg\r\nContent-Length: %lu\r\n\r\n",
+                               (unsigned long)jpeg_size);
+            ret = httpd_resp_send_chunk(req, part, len);
+        }
+        if (ret == ESP_OK) {
+            ret = httpd_resp_send_chunk(req, (const char *)s_jpeg_outbuf, jpeg_size);
+        }
+        xSemaphoreGive(s_cam_lock);
+    }
+    ESP_LOGI(TAG, "stream closed");
+    return ret;
+}
+
+static void start_http(void)
+{
+    httpd_handle_t server;
+    httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
+    /* Drop the oldest connection instead of refusing new ones when clients
+     * vanish without closing (e.g. a laptop switching networks). */
+    cfg.lru_purge_enable = true;
+    ESP_ERROR_CHECK(httpd_start(&server, &cfg));
+    const httpd_uri_t jpg = { .uri = "/jpg", .method = HTTP_GET, .handler = jpg_handler };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(server, &jpg));
+    wifi_register_http(server);
+
+    httpd_handle_t stream_server;
+    cfg.server_port = 81;
+    cfg.ctrl_port += 1;
+    ESP_ERROR_CHECK(httpd_start(&stream_server, &cfg));
+    const httpd_uri_t stream = { .uri = "/stream", .method = HTTP_GET, .handler = stream_handler };
+    ESP_ERROR_CHECK(httpd_register_uri_handler(stream_server, &stream));
 }
 
 void app_main(void)
 {
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    lcd_init();
+    wifi_start();
+
     gpio_config_t cam_en_cfg = {
         .pin_bit_mask = 1ULL << CAM_ENABLE_PIN,
         .mode = GPIO_MODE_OUTPUT,
@@ -171,18 +235,27 @@ void app_main(void)
         .image_quality = JPEG_QUALITY,
     };
 
-    /* UVC copies each frame into this transfer buffer. */
-    uint8_t *uvc_buffer = heap_caps_malloc(s_jpeg_outbuf_size, MALLOC_CAP_SPIRAM);
-    assert(uvc_buffer != NULL);
-    uvc_device_config_t uvc_cfg = {
-        .uvc_buffer = uvc_buffer,
-        .uvc_buffer_size = s_jpeg_outbuf_size,
-        .start_cb = uvc_start_cb,
-        .fb_get_cb = uvc_fb_get_cb,
-        .fb_return_cb = uvc_fb_return_cb,
-        .stop_cb = uvc_stop_cb,
-    };
-    ESP_ERROR_CHECK(uvc_device_config(0, &uvc_cfg));
-    ESP_ERROR_CHECK(uvc_device_init());
-    ESP_LOGI(TAG, "UVC ready, connect HUSB to host");
+    for (int i = 0; i < BUF_COUNT; i++) {
+        struct v4l2_buffer buf = {
+            .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+            .memory = V4L2_MEMORY_MMAP,
+            .index = i,
+        };
+        ESP_ERROR_CHECK(ioctl(fd, VIDIOC_QBUF, &buf));
+    }
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ESP_ERROR_CHECK(ioctl(fd, VIDIOC_STREAMON, &type));
+
+    s_cam_lock = xSemaphoreCreateMutex();
+    start_http();
+    ESP_LOGI(TAG, "camera ready: http://<ip>/jpg, http://<ip>:81/stream");
+
+    esp_console_repl_t *repl;
+    esp_console_repl_config_t repl_cfg = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_cfg.prompt = "maxibot>";
+    esp_console_dev_usb_serial_jtag_config_t usj_cfg = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&usj_cfg, &repl_cfg, &repl));
+    ESP_ERROR_CHECK(esp_console_register_help_command());
+    wifi_register_command();
+    ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

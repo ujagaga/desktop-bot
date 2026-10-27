@@ -1,0 +1,37 @@
+# eh_host_feat_wifi_ext_itwt — host Wi-Fi extension typed wrappers.
+# SPDX-License-Identifier: Apache-2.0
+
+if(NOT CONFIG_ESP_HOSTED_HOST_FEAT_WIFI_EXT_ITWT_READY)
+    return()
+endif()
+
+add_library(eh_host_feat_wifi_ext_itwt STATIC
+    "src/eh_host_feat_wifi_ext_itwt.c"
+)
+
+target_include_directories(eh_host_feat_wifi_ext_itwt
+    PUBLIC "include"
+    PRIVATE "src"
+)
+
+target_link_libraries(eh_host_feat_wifi_ext_itwt
+    PUBLIC
+        eh_host_port_api
+        eh_common
+    PRIVATE
+        eh_host_config                # eh_host_master_config.h
+)
+
+
+
+
+target_sources(eh_host_feat_wifi_ext_itwt PRIVATE
+    "src/eh_host_wifi_itwt.c"
+    "src/eh_host_feat_wifi_ext_itwt_v2_req.c"
+    "src/eh_host_feat_wifi_ext_itwt_v2_resp_evt.c"
+)
+target_link_libraries(eh_host_feat_wifi_ext_itwt PRIVATE
+    eh_host_feat_rpc_ext_v2  # eh_rpc_ctrl_cmd_t / types / api_common
+    eh_host_feat_rpc          # request_sync
+    eh_proto_v2              # pb-c types + RPC_ID__* constants
+)
