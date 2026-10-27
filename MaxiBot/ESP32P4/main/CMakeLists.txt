@@ -1,1 +1,1 @@
-idf_component_register(SRCS "main.c" "wifi.c" "lcd.c" PRIV_REQUIRES driver esp_driver_jpeg esp_wifi esp_netif nvs_flash esp_http_server console mdns esp_lcd)
+idf_component_register(SRCS "main.c" "wifi.c" "lcd.c" "cmd.c" "gyro.c" "head.c" "audio.c" "wake_word.cc" PRIV_REQUIRES driver esp_driver_jpeg esp_wifi esp_netif nvs_flash esp_http_server console mdns esp_lcd esp_driver_i2s microfrontend espressif__esp-tflite-micro)

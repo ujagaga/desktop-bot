@@ -23,6 +23,30 @@ dependencies:
       registry_url: https://components.espressif.com
       type: service
     version: 1.1.6
+  espressif/esp-nn:
+    component_hash: 3b3411b0e4ad1717a72870fde9f9b67cef6f3f97491cc64fcfc1910a8fd8a246
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.1'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.4.1
+  espressif/esp-tflite-micro:
+    component_hash: bdb2625ed976d5b861177cdc295abc6738724f84f4c7c60fc58c721d2b30bed6
+    dependencies:
+    - name: espressif/esp-nn
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=1.3.0'
+    - name: idf
+      require: private
+      version: '>=5.1'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.4.1
   espressif/esp_cam_sensor:
     component_hash: 4ed9e34055a7ac5d6c60552c21dfa470deaadb7eda8040d157c5f3314de8d2fd
     dependencies:
@@ -255,11 +279,12 @@ dependencies:
       type: idf
     version: 6.0.3
 direct_dependencies:
+- espressif/esp-tflite-micro
 - espressif/esp_hosted
 - espressif/esp_video
 - espressif/esp_wifi_remote
 - espressif/mdns
 - idf
-manifest_hash: 1bba5707b9a0b5ed955f7b9bf80f1275a69f4838a2d177c8194068a09710158a
+manifest_hash: 5c4e57cbaa799ad71846d7662297876566246b0c3e3b557f6602f35ee55eef72
 target: esp32p4
 version: 3.0.0

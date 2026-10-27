@@ -26,6 +26,11 @@
 #include "nvs_flash.h"
 #include "wifi.h"
 #include "lcd.h"
+#include "cmd.h"
+#include "gyro.h"
+#include "head.h"
+#include "audio.h"
+#include "wake_word.h"
 #include "config.h"
 
 
@@ -126,10 +131,13 @@ static void start_http(void)
     /* Drop the oldest connection instead of refusing new ones when clients
      * vanish without closing (e.g. a laptop switching networks). */
     cfg.lru_purge_enable = true;
+    cfg.max_uri_handlers = 12;
     ESP_ERROR_CHECK(httpd_start(&server, &cfg));
     const httpd_uri_t jpg = { .uri = "/jpg", .method = HTTP_GET, .handler = jpg_handler };
     ESP_ERROR_CHECK(httpd_register_uri_handler(server, &jpg));
     wifi_register_http(server);
+    cmd_register_http(server);
+    audio_register_http(server);
 
     httpd_handle_t stream_server;
     cfg.server_port = 81;
@@ -150,6 +158,10 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     lcd_init();
+    head_start();
+    gyro_start();
+    audio_start();
+    wake_word_start();
     wifi_start();
 
     gpio_config_t cam_en_cfg = {
@@ -257,5 +269,9 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&usj_cfg, &repl_cfg, &repl));
     ESP_ERROR_CHECK(esp_console_register_help_command());
     wifi_register_command();
+    gyro_register_command();
+    head_register_command();
+    audio_register_command();
+    wake_word_register_command();
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

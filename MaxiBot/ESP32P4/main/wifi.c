@@ -28,6 +28,7 @@
 #include "freertos/task.h"
 #include "config.h"
 #include "lcd.h"
+#include "cmd.h"
 #include "wifi.h"
 
 #define NVS_NAMESPACE "wifi"
@@ -315,7 +316,7 @@ static int cmd_wifi(int argc, char **argv)
 {
     if (argc >= 3 && argc <= 4 && strcmp(argv[1], "set") == 0) {
         if (wifi_save(argv[2], argc == 4 ? argv[3] : "") != ESP_OK) {
-            printf("ssid or password too long\n");
+            cmd_printf("ssid or password too long\n");
             return 1;
         }
         return 0;
@@ -327,21 +328,21 @@ static int cmd_wifi(int argc, char **argv)
     if (argc == 2 && strcmp(argv[1], "ip") == 0) {
         char ip[20];
         get_ip(ip, sizeof(ip));
-        printf("%s\n", ip);
-        printf("%s.local\n", s_hostname);
+        cmd_printf("%s\n", ip);
+        cmd_printf("%s.local\n", s_hostname);
         if (s_ap_mode) {
-            printf("setup hotspot \"%s\" on 192.168.4.1\n", (char *)s_ap_cfg.ap.ssid);
+            cmd_printf("setup hotspot \"%s\" on 192.168.4.1\n", (char *)s_ap_cfg.ap.ssid);
         }
         return 0;
     }
     if (argc == 3 && strcmp(argv[1], "host") == 0) {
         if (set_hostname(argv[2]) != ESP_OK) {
-            printf("hostname: 1-31 chars, a-z 0-9 -\n");
+            cmd_printf("hostname: 1-31 chars, a-z 0-9 -\n");
             return 1;
         }
         return 0;
     }
-    printf("usage: wifi set <ssid> [password] | wifi clear | wifi ip | wifi host <name>\n");
+    cmd_printf("usage: wifi set <ssid> [password] | wifi clear | wifi ip | wifi host <name>\n");
     return 1;
 }
 
@@ -352,7 +353,7 @@ void wifi_register_command(void)
         .help = "wifi set <ssid> [password] | wifi clear | wifi ip | wifi host <name>",
         .func = cmd_wifi,
     };
-    ESP_ERROR_CHECK(esp_console_cmd_register(&cmd));
+    cmd_register(&cmd);
 }
 
 static const char SETUP_HTML[] =
