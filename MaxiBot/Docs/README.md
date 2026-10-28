@@ -3,7 +3,9 @@
 MaxiBot is a desk robot built on the WT9932P4-TINY (ESP32-P4) with an
 ESP32-WROOM-32D as its Wi-Fi co-processor. It reuses the MiniBot voice
 assistant (wake word, then a Gemini Live conversation through the gateway in
-`server/conversation.py`). It differs from MiniBot in these ways:
+`server/conversation.py`), with the same server and scripts. MiniBot will be
+retired, so the two robots do not have to differ in wake word or gateway
+settings. It differs from MiniBot in these ways:
 
 | | MiniBot | MaxiBot |
 | --- | --- | --- |
@@ -15,7 +17,7 @@ assistant (wake word, then a Gemini Live conversation through the gateway in
 | LCD | 240x240, faces | 2.25" ST7789 76x284, sound graphics and text |
 | IMU | QMI8658, taps, tilt sleep | MPU6050, precise angles (navigation later) |
 | Camera | separate ESP32-CAM, UART link | OV5647 on the P4 itself |
-| Wake word | "Hey Jarvis" | "Hey Mycroft" |
+| Wake word | "Hey Jarvis" | "Hey Jarvis" |
 
 ## Hardware
 
@@ -30,12 +32,13 @@ Wiring follows [Schematic.png](Schematic.png).
 | Speaker data out | IO19 | MAX98357A DIN |
 | Amp enable | IO20 | MAX98357A SD |
 | MPU6050 SCL / SDA / INT | IO15 / IO14 / IO13 | GY-521, AD0 to GND (0x68) |
-| LCD SCL / SDA / RES / DC / CS / BL | IO5 / IO6 / IO9 / IO10 / IO11 / IO12 | ST7789 |
+| TOF400C SCL / SDA / INT | IO15 / IO14 / IO49 | VL53L1X (0x29), same I2C bus as the MPU6050, XSHUT tied high |
+| LCD SCL / SDA / RES / DC / CS / BL | IO5 / IO6 / IO9 / IO10 / IO11 / IO12 | ST7789; BL is active low (backlight on with IO12 low) |
 | Tilt servo / Pan servo | IO28 / IO29 | SG90 signal |
 | WROOM EN (reset) | IO22 | EN |
 | SPI MOSI / MISO / SCLK / CS | IO23 / IO34 / IO33 / IO32 | GPIO23 / 19 / 18 / 5 |
 | Handshake / Data ready | IO26 / IO27 | GPIO17 / GPIO16 |
-| Camera | CSI connector | OV5647 (already working as USB UVC webcam) |
+| Camera | CSI connector | OV5647, MJPEG over Wi-Fi |
 | IR LED / IR receiver | IO30 / IO31 | transistor base (or MOSFET gate) / TSOP38238 OUT |
 
 Power: MAX98357A, both servos and the WROOM run from the common 5 V supply.
@@ -59,11 +62,11 @@ Each part is ported from Arduino to ESP-IDF, not copied file by file.
 | MiniBot source | MaxiBot module | Change |
 | --- | --- | --- |
 | `audio.cpp` | `audio` | IDF `i2s_std`, 16 kHz, new pins: I2S0 master full duplex (speaker + stereo mic line A), I2S1 slave RX on the same BCLK/WS (stereo mic line B) |
-| `wake_word.cpp`, `libraries/microfrontend` | `wake_word` | microWakeWord "hey_mycroft" model; esp-tflite-micro has P4 support |
+| `wake_word.cpp`, `libraries/microfrontend` | `wake_word` | same "hey_jarvis" model; microfrontend as a local component on esp-tflite-micro |
 | `voice.cpp` | `voice` | `esp_websocket_client` instead of arduinoWebSockets; same protocol, chime, mute during playback, 8 s follow-up |
-| `comms.cpp` command console | `console` | same line commands over USB-Serial-JTAG and HTTP |
-| `wifi_connection.cpp`, ESP32-CAM setup AP | `wifi` | `esp_wifi_remote` through ESP-Hosted; credentials in NVS; setup AP as on the ESP32-CAM |
-| `http_server.cpp` | `http` | web console, `/command` endpoint |
+| `comms.cpp` command console | `cmd` | same line commands over USB-Serial-JTAG and HTTP (`GET /command?cmd=...`) |
+| `wifi_connection.cpp`, relay device setup AP | `wifi` | `esp_wifi_remote` through ESP-Hosted; credentials in NVS; setup hotspot and page; mDNS name (`maxibot.local`) |
+| `http_server.cpp` | `main`, `wifi`, `cmd` | port 80: setup page, `/jpg`, `/command`, `/audio.wav`; port 81: `/stream` |
 | OTA check from GitHub | `ota` | P4 app only at first; WROOM updates stay manual |
 | CAM snapshot at session start | `voice` | P4 sends its own JPEG frame (`{"type":"snapshot"}` + binary frame) |
 
@@ -99,7 +102,9 @@ The head moves on its own:
   (time difference between mics, GCC-PHAT). After the wake word, the head pans
   toward the voice. Then face detection (esp-dl) on camera frames takes over
   and keeps the nearest face centered. With no face in view, the head stays
-  pointed at the voice.
+  pointed at the voice. Only detection runs on the robot. Recognizing who it
+  is happens on the server, from the snapshot sent at each session, so new
+  people can be added there at any time.
 - **Nod.** Small tilt movements while the user speaks (acknowledging) and
   while the robot replies.
 
@@ -130,6 +135,34 @@ gyro angle <x|y|z>
 gyro rate <x|y|z>
 gyro calibrate
 ```
+
+## Distance sensor
+
+One TOF400C (VL53L1X laser time-of-flight sensor) sits in the head next to
+the camera, so it measures what the camera sees: the distance to a face, an
+object being followed, or a wall. Range is up to about 4 m (less on dark
+surfaces and in sunlight), with one reading over a field of about 27°, at up
+to 50 Hz.
+
+- The sensor needs an open hole or an IR-transparent window right at its
+  lens. Plastic or glass in front of it reflects the laser back into it.
+- It shares the I2C bus with the MPU6050 (400 kHz). INT on IO49 is optional
+  ("data ready"); without it the firmware polls. XSHUT is tied high and is
+  only needed if a second VL53 sensor is added later.
+- **Scan**: standing still, the head pans in small steps and records the
+  distance at each angle, a slow scan of the room (about 5-10 s for 180°).
+  Together with the gyro heading this finds walls and doorways for
+  navigation later.
+- Obstacle sensors for driving belong on the base (its own ESP32), low and
+  facing forward, because the head turns away when it looks at people.
+
+```text
+tof                     distance in mm
+tof scan [from] [to] [step]   pan the head, print angle and distance
+```
+
+If one reading at a time turns out too slow for scans, a VL53L5CX or
+VL53L7CX (8x8 zones in one reading) uses the same wiring.
 
 ## IR remote
 
@@ -182,21 +215,25 @@ ir delete <name>
 
 ## Gateway changes
 
-- First iteration: MaxiBot uses the existing gateway as is (same
-  `/conversation` WebSocket and API key as MiniBot).
-- Later: separate MaxiBot endpoints, so MaxiBot-only tools (follow object)
-  and settings (voice, system instruction) do not affect MiniBot.
+- MaxiBot uses the existing gateway as is (same `/conversation` WebSocket and
+  API key as MiniBot). MiniBot will be retired, so no separate MaxiBot
+  endpoints are needed; MaxiBot-only tools (follow object) are added to the
+  same gateway.
 - The `sleep` tool has no meaning for MaxiBot, since it does not sleep.
 
 ## Build phases
 
-Each phase ends with something testable on the robot.
+Each phase ends with something testable on the robot. Status as of
+2026-10-28 is in brackets.
 
 1. **Console and Wi-Fi.** ESP-Hosted host side on the P4, Wi-Fi station with
-   NVS credentials, `wifi on/off/clear/ip`, USB-Serial-JTAG console, HTTP
+   NVS credentials, `wifi set/clear/ip/host`, USB-Serial-JTAG console, HTTP
    console. Test: `wifi ip` returns an address, the web console works.
+   [Done: also setup hotspot and page, hotspot on/off button, `maxibot.local`,
+   `GET /command`. No web console page yet.]
 2. **LCD.** ST7789 driver (`esp_lcd`), text screen, status screen with IP.
    Wi-Fi setup AP with its credentials on screen when no network is saved.
+   [Done.]
 3. **Audio.** I2S full duplex, `audio test` (tone, record 2 s, play back).
    First check that the I2S1 slave receiver can share the BCLK/WS pins
    driven by I2S0 (connected inside the GPIO matrix with
@@ -209,16 +246,29 @@ Each phase ends with something testable on the robot.
    from the speaker position, and shifts line B by the difference. The two
    mics on the same line are always aligned.
    Then `audio dir` prints the voice direction.
-4. **Wake word.** microWakeWord with the new model, `ww` statistics command.
+   [Started: I2S0 full duplex, `audio test`, `GET /audio.wav`. The one fitted
+   mic gives no signal yet (wiring to check). I2S1 line B and `audio dir` not
+   started.]
+4. **Wake word.** microWakeWord with the MiniBot model, `ww` statistics
+   command. [Ported and builds; not tested until the mic works. A detection
+   only logs for now.]
 5. **Voice.** Gateway session, chime, playback, follow-up window, `voice ...`
    commands. Test: a full spoken conversation.
 6. **Sound graphics.** Level-following screens for listening and speaking.
 7. **Head servos.** `head` commands, smooth motion, nodding.
-8. **IMU.** MPU6050 angles and calibration.
-9. **Camera.** Camera running alongside Wi-Fi (the USB UVC stream can stay as
-   a debug option), snapshot at session start for face recognition, face
-   detection driving the head, then object following with a gateway tool.
+   [Started: `head <pan> <tilt>`, `head center`, smooth motion. No nodding or
+   `head auto` yet.]
+8. **IMU.** MPU6050 angles and calibration. [Done.]
+9. **Camera.** Camera running alongside Wi-Fi, snapshot at session start for
+   face recognition on the server, face detection driving the head, then
+   object following with a gateway tool.
+   [Started: MJPEG at `http://maxibot.local:81/stream` and `/jpg`, quality
+   with `?q=` (default 60). The USB UVC stream was removed. Measured about
+   19-25 fps at 800x800 through the router, 35 fps (the camera's limit)
+   over a direct hotspot link.]
 10. **OTA.** GitHub firmware check for the P4.
 11. **IR remote.** RMT learn and send, `/ir` server endpoints, `ir ...`
     commands, then the gateway tool. Needs only phase 1 (and phase 7 for
     aiming), so it can move earlier.
+12. **Distance sensor.** TOF400C driver, `tof` reading, then `tof scan` with
+    the head servos. Needs phases 7 and 8.
