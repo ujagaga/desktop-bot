@@ -1,3 +1,5 @@
-/ESP32P4/build
+/ESP32P4/build/*
+# Release binary for GitHub OTA (see ESP32P4/main/ota.c), as in MiniBot
+!/ESP32P4/build/maxibot.bin
 /python/.venv
 /ESP32WROOM/build

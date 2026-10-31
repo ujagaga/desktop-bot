@@ -30,12 +30,7 @@ void esp_nn_max_pool_s8_riscv_pie(const int8_t *input,
                                  const uint16_t channels)
 {
     /* Enable PIE */
-    asm volatile (
-        "csrsi  0x7f2, 0b01        \n\t"
-        "li     x29, 0b10          \n\t"
-        "esp.movx.w.cfg x29        \n\t"
-        ::: "x29"
-    );
+    ESP_NN_PIE_ENABLE();
 
     /* Broadcast activation_min and activation_max into vectors */
     int8_t act_min_val = (int8_t) activation_min;

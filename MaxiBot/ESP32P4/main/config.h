@@ -1,5 +1,12 @@
 #pragma once
 
+/* Bump for every release; OTA installs a GitHub build only if this is higher.
+ * Keep it a plain decimal integer: the robot parses this line from GitHub. */
+#define FIRMWARE_VERSION 1
+#define OTA_GITHUB_REPOSITORY "ujagaga/desktop-bot"
+#define OTA_GITHUB_BRANCH "main"
+#define OTA_FIRMWARE_DIRECTORY "MaxiBot/ESP32P4"
+
 /* SCCB I2C wiring and CSI reset/pwdn per WT9932P4-TINY schematic V1.3. */
 #define CAM_I2C_PORT     0
 #define CAM_I2C_SCL_PIN  8
@@ -64,10 +71,12 @@
  * INMP441 mics (L/R pin picks the slot) and the MAX98357A share BCLK/WS. */
 #define AUDIO_BCLK_PIN   16
 #define AUDIO_WS_PIN     17
-/* Mic data line A (mic3 left, mic4 right); line B (IO21) is not used yet. */
-#define AUDIO_MIC_PIN    18
+/* Mic data line A on I2S0 (mic3 left, mic4 right) and line B on I2S1, a
+ * clock slave on the same BCLK/WS (mic1 left, mic2 right). */
+#define AUDIO_MIC_A_PIN  18
+#define AUDIO_MIC_B_PIN  21
 #define AUDIO_DOUT_PIN   19
 #define AUDIO_AMP_SD_PIN 20
 #define AUDIO_RATE       16000
-/* Mic slot the wake word listens to: 0 = left (L/R to GND), 1 = right. */
-#define AUDIO_WAKE_SLOT  0
+/* Mic the wake word listens to: 1-4. */
+#define AUDIO_WAKE_MIC   3

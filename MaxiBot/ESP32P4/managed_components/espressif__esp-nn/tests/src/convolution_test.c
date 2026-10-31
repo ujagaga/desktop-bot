@@ -41,7 +41,7 @@ void esp_nn_depthwise_conv_s8_test()
     // The 27-32 block carries the large channel counts that regressed the P4
     // PIE path: its offset/bias workspace used to stop at 256 channels and
     // silently produced incorrect results above that limit.
-    for (int itr = 0; itr < 35; itr++) {
+    for (int itr = 0; itr < 37; itr++) {
         bool no_bias = false;
         /* Explicit output dims (0 = derive from pad/stride below). Needed for
          * TFLite-style asymmetric "SAME" padding where only the leading
@@ -414,6 +414,31 @@ void esp_nn_depthwise_conv_s8_test()
             stride_wd = 2;
             stride_ht = 2;
             break;
+        case 35: // width 1, 8 channels: 8-byte rows on the s16 tiled path
+                 // (too large for the untiled s16 scratch), 3x1 SAME
+            input_wd = 1;
+            input_ht = 3072;
+            filter_ht = 3;
+            filter_wd = 1;
+            ch_mult = 1;
+            channels = 8;
+            pad_wd = 0;
+            pad_ht = 1;
+            stride_wd = 1;
+            stride_ht = 1;
+            break;
+        case 36: // as 35 with a 1x1 filter
+            input_wd = 1;
+            input_ht = 3072;
+            filter_ht = 1;
+            filter_wd = 1;
+            ch_mult = 1;
+            channels = 8;
+            pad_wd = 0;
+            pad_ht = 0;
+            stride_wd = 1;
+            stride_ht = 1;
+            break;
         case 32: // 520 channels, 8 mod 16, stride 2
             input_wd = 9;
             input_ht = 5;
@@ -686,7 +711,7 @@ void esp_nn_conv_s8_test()
     uint16_t pad_wd, pad_ht, stride_wd, stride_ht;
 
     printf("\n######## Running %s ##########\n", __FUNCTION__);
-    for (int itr = 0; itr < 47; itr++) {
+    for (int itr = 0; itr < 58; itr++) {
         /* Reset quant params to defaults each iteration */
         input_offset = 5;
         out_offset = 3;
@@ -699,6 +724,27 @@ void esp_nn_conv_s8_test()
         int groups = 1;
 
         switch (itr) {
+        /* Input side smaller than the filter under TFLite SAME padding with
+         * stride 2: the leading pad is 0, so (in - filter + pad) is negative.
+         * Small in_channels sends these through the im2col path. */
+        case 55: // 2x2x3 -> 1x1, 3x3 filter
+            in_wd = 2; in_ht = 2; in_channels = 3; out_channels = 8;
+            filter_ht = 3; filter_wd = 3; pad_wd = 0; pad_ht = 0;
+            stride_wd = 2; stride_ht = 2;
+            force_out_wd = 1; force_out_ht = 1;
+            break;
+        case 56: // 8x2x3 -> 4x1: only the height is smaller than the filter
+            in_wd = 8; in_ht = 2; in_channels = 3; out_channels = 8;
+            filter_ht = 3; filter_wd = 3; pad_wd = 0; pad_ht = 0;
+            stride_wd = 2; stride_ht = 2;
+            force_out_wd = 4; force_out_ht = 1;
+            break;
+        case 57: // 2x8x4 -> 1x4: only the width is smaller than the filter
+            in_wd = 2; in_ht = 8; in_channels = 4; out_channels = 8;
+            filter_ht = 3; filter_wd = 3; pad_wd = 0; pad_ht = 0;
+            stride_wd = 2; stride_ht = 2;
+            force_out_wd = 1; force_out_ht = 4;
+            break;
         case 29: // grouped 1x1 conv (groups=4)
             in_wd = 8;
             in_ht = 8;
@@ -734,6 +780,59 @@ void esp_nn_conv_s8_test()
             in_wd = 6; in_ht = 6; in_channels = 256; out_channels = 64;
             filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
             stride_wd = 1; stride_ht = 1;
+            break;
+        /* GitHub issue #36: the six CONV_2D layers of an LSTM-heavy audio
+         * model on ESP32-S3 (3x3 SAME, in_ch 1/2/32, out_ch 32/64). The
+         * reported 1.1.2 -> 1.2.6 slowdown did not reproduce on these layers;
+         * they keep the paths it was about covered. in_ch 1 takes the general
+         * path, in_ch 2 the small-window im2col path, in_ch 32 the staged 3x3
+         * path (out_ch 32 below and 64 above the vectorized filter-sum gate). */
+        case 47: // 3x3x1 -> 32
+            in_wd = 32; in_ht = 16; in_channels = 1; out_channels = 32;
+            filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
+            stride_wd = 1; stride_ht = 1;
+            break;
+        case 48: // 3x3x32 -> 32
+            in_wd = 32; in_ht = 16; in_channels = 32; out_channels = 32;
+            filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
+            stride_wd = 1; stride_ht = 1;
+            break;
+        case 49: // 3x3x32 -> 64
+            in_wd = 32; in_ht = 16; in_channels = 32; out_channels = 64;
+            filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
+            stride_wd = 1; stride_ht = 1;
+            break;
+        case 50: // 3x3x2 -> 32
+            in_wd = 32; in_ht = 16; in_channels = 2; out_channels = 32;
+            filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
+            stride_wd = 1; stride_ht = 1;
+            break;
+        case 51: // 3x3x32 -> 32, stride 2 (a strided variant of the same layer)
+            in_wd = 32; in_ht = 16; in_channels = 32; out_channels = 32;
+            filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
+            stride_wd = 2; stride_ht = 2;
+            break;
+        case 52: // 3x3x32 -> 64 on a wide, short map (time x frequency)
+            in_wd = 96; in_ht = 8; in_channels = 32; out_channels = 64;
+            filter_ht = 3; filter_wd = 3; pad_wd = 1; pad_ht = 1;
+            stride_wd = 1; stride_ht = 1;
+            break;
+        case 53: // 1x1, filter misaligned by 5 (see case 17), 5x5 output: 25
+                 // pixels, and each half of the dual-core row split is under
+                 // 16, so every pixel takes the per-pixel XACC path on both
+                 // cores. Case 17's 576 pixels all go through the 16-pixel
+                 // batch and never reach it.
+        case 54: // as 53 with 7x7 = 49 pixels: batched groups plus a tail
+            in_wd = itr == 53 ? 5 : 7;
+            in_ht = in_wd;
+            in_channels = 32;
+            out_channels = 32;
+            filter_ht = 1;
+            filter_wd = 1;
+            pad_wd = 0;
+            pad_ht = 0;
+            stride_wd = 1;
+            stride_ht = 1;
             break;
         case 42: // big-filter padded conv: pad 1, filter_wd * in_ch >= 16 and
                  // filter bytes > 96 KB, so the P4 dispatcher takes the dense
@@ -1279,7 +1378,8 @@ void esp_nn_conv_s8_test()
 
         int in_size = in_wd * in_ht * in_channels;
         int filter_size = filter_wd * filter_ht * in_channels * out_channels;
-        int filter_prefix = itr == 17 ? 5 : 0;
+        const bool misalign_filter = itr == 17 || itr == 53 || itr == 54;
+        int filter_prefix = misalign_filter ? 5 : 0;
         int out_size = out_wd * out_ht * out_channels;
 
         input_orig = ESP_NN_TEST_ALLOC(in_size + 16);
@@ -1315,7 +1415,7 @@ void esp_nn_conv_s8_test()
         /* Case 17: deliberately misalign filter by 5 bytes to test alignment handling.
          * This reproduces the bug where ee.vld.l.64.ip ignores lower address bits. */
         filter_data_orig_save = filter_data;
-        if (itr == 17) {
+        if (misalign_filter) {
             filter_data = filter_data + 5; /* misalign by 5 bytes (like YOLO's 0x3c05fe55) */
         }
 

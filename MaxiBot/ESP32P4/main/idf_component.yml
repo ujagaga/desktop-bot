@@ -3,7 +3,7 @@ dependencies:
   esp_video:
     version: 2.3.*
     public: true
-  espressif/esp_hosted: '*'
+  espressif/esp_hosted: '3.0.*'
   espressif/esp_wifi_remote: '*'
   espressif/mdns: '*'
   espressif/esp-tflite-micro: '*'

@@ -61,7 +61,7 @@ Each part is ported from Arduino to ESP-IDF, not copied file by file.
 
 | MiniBot source | MaxiBot module | Change |
 | --- | --- | --- |
-| `audio.cpp` | `audio` | IDF `i2s_std`, 16 kHz, new pins: I2S0 master full duplex (speaker + stereo mic line A), I2S1 slave RX on the same BCLK/WS (stereo mic line B) |
+| `audio.cpp` | `audio` | IDF `i2s_std`, 16 kHz, new pins: I2S0 master full duplex (speaker + stereo mic line A), I2S1 slave RX on the same BCLK/WS (stereo mic line B), lines aligned at start |
 | `wake_word.cpp`, `libraries/microfrontend` | `wake_word` | same "hey_jarvis" model; microfrontend as a local component on esp-tflite-micro |
 | `voice.cpp` | `voice` | `esp_websocket_client` instead of arduinoWebSockets; same protocol, chime, mute during playback, 8 s follow-up |
 | `comms.cpp` command console | `cmd` | same line commands over USB-Serial-JTAG and HTTP (`GET /command?cmd=...`) |
@@ -235,20 +235,21 @@ Each phase ends with something testable on the robot. Status as of
    Wi-Fi setup AP with its credentials on screen when no network is saved.
    [Done.]
 3. **Audio.** I2S full duplex, `audio test` (tone, record 2 s, play back).
-   First check that the I2S1 slave receiver can share the BCLK/WS pins
-   driven by I2S0 (connected inside the GPIO matrix with
-   `esp_rom_gpio_connect_out_signal` / `esp_rom_gpio_connect_in_signal`).
-   If not, use mics 3 and 4 only.
+   I2S1 is a clock slave on the BCLK/WS pins driven by I2S0, reading
+   line B. If that does not work, use mics 3 and 4 only.
    The two controllers do not start recording on the same sample. Because
    they share one clock, the offset is a whole number of samples and stays
-   fixed until the next start. At each start the robot plays a short chirp,
-   compares when it reaches line A and line B against the delay expected
-   from the speaker position, and shifts line B by the difference. The two
-   mics on the same line are always aligned.
+   fixed until the next start. At start (and after a DMA overflow), I2S1
+   briefly reads line A through the GPIO matrix, the two copies of line A
+   are cross-correlated to find the offset, and the earlier line drops that
+   many frames. This needs no speaker. The two mics on the same line are
+   always aligned.
    Then `audio dir` prints the voice direction.
-   [Started: I2S0 full duplex, `audio test`, `GET /audio.wav`. The one fitted
-   mic gives no signal yet (wiring to check). I2S1 line B and `audio dir` not
-   started.]
+   [Started: I2S0 full duplex, `audio test`, `GET /audio.wav`. Code for all
+   four mics written and builds, not run: one capture task reads both lines
+   (frames mic1-mic4), `audio test` prints each mic's level and whether the
+   lines are aligned, `/audio.wav` has four channels, the wake word listens
+   to `AUDIO_WAKE_MIC`. `audio dir` not started (needs the mic positions).]
 4. **Wake word.** microWakeWord with the MiniBot model, `ww` statistics
    command. [Ported and builds; not tested until the mic works. A detection
    only logs for now.]
@@ -267,6 +268,15 @@ Each phase ends with something testable on the robot. Status as of
    19-25 fps at 800x800 through the router, 35 fps (the camera's limit)
    over a direct hotspot link.]
 10. **OTA.** GitHub firmware check for the P4.
+    [Written as on MiniBot, builds; not tested on the board yet. Needs one
+    USB flash for the new partition table (two 4 MB slots).]
+    After each Wi-Fi connection, and on `ota check`, the robot reads
+    `FIRMWARE_VERSION` from `ESP32P4/main/config.h` at the latest `main`
+    commit and installs `ESP32P4/build/maxibot.bin` from the same commit if
+    the version is higher. A new image confirms itself after 60 s; a crash
+    before that rolls back to the previous one. To release: bump
+    `FIRMWARE_VERSION`, run `tools/build_p4.sh`, and commit `config.h`
+    together with `build/maxibot.bin`.
 11. **IR remote.** RMT learn and send, `/ir` server endpoints, `ir ...`
     commands, then the gateway tool. Needs only phase 1 (and phase 7 for
     aiming), so it can move earlier.
