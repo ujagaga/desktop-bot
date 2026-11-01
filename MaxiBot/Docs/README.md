@@ -28,8 +28,8 @@ Wiring follows [Schematic.png](Schematic.png).
 | I2S BCLK | IO16 | all four INMP441 SCK, MAX98357A BCLK |
 | I2S WS | IO17 | all four INMP441 WS, MAX98357A LRC |
 | Mic data in A | IO18 | mic3 SD (L/R to GND, left) + mic4 SD (L/R to 3.3 V, right) |
-| Mic data in B | IO21 | mic1 SD (L/R to GND, left) + mic2 SD (L/R to 3.3 V, right) |
-| Speaker data out | IO19 | MAX98357A DIN |
+| Mic data in B | IO19 | mic1 SD (L/R to GND, left) + mic2 SD (L/R to 3.3 V, right) |
+| Speaker data out | IO21 | MAX98357A DIN |
 | Amp enable | IO20 | MAX98357A SD |
 | MPU6050 SCL / SDA / INT | IO15 / IO14 / IO13 | GY-521, AD0 to GND (0x68) |
 | VL53L5CX SCL / SDA / INT / LPn | IO15 / IO14 / IO49 / IO48 | 8x8 zone ToF (0x29), same I2C bus as the MPU6050; INT optional |
@@ -49,7 +49,7 @@ capacitor near the servos.
 Microphones: four INMP441 in a square about 4-6 cm across, facing outward,
 away from the speaker and servos. Each mic has its own 100 nF decoupling
 capacitor. Two mics share each data line, one in the left slot and one in the
-right. Mics 1 and 2 (IO21) can be left unpopulated and the robot works with
+right. Mics 1 and 2 (IO19) can be left unpopulated and the robot works with
 mics 3 and 4 on IO18 (one stereo line, left/right direction only).
 
 The WROOM firmware (`ESP32WROOM/`, ESP-Hosted SPI co-processor) already uses

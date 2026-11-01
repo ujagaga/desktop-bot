@@ -74,8 +74,8 @@
 /* Mic data line A on I2S0 (mic3 left, mic4 right) and line B on I2S1, a
  * clock slave on the same BCLK/WS (mic1 left, mic2 right). */
 #define AUDIO_MIC_A_PIN  18
-#define AUDIO_MIC_B_PIN  21
-#define AUDIO_DOUT_PIN   19
+#define AUDIO_MIC_B_PIN  19
+#define AUDIO_DOUT_PIN   21
 #define AUDIO_AMP_SD_PIN 20
 #define AUDIO_RATE       16000
 /* Mic the wake word listens to: 1-4. */
