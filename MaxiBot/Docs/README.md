@@ -32,7 +32,7 @@ Wiring follows [Schematic.png](Schematic.png).
 | Speaker data out | IO19 | MAX98357A DIN |
 | Amp enable | IO20 | MAX98357A SD |
 | MPU6050 SCL / SDA / INT | IO15 / IO14 / IO13 | GY-521, AD0 to GND (0x68) |
-| TOF400C SCL / SDA / INT | IO15 / IO14 / IO49 | VL53L1X (0x29), same I2C bus as the MPU6050, XSHUT tied high |
+| VL53L5CX SCL / SDA / INT / LPn | IO15 / IO14 / IO49 / IO48 | 8x8 zone ToF (0x29), same I2C bus as the MPU6050; INT optional |
 | LCD SCL / SDA / RES / DC / CS / BL | IO5 / IO6 / IO9 / IO10 / IO11 / IO12 | ST7789; BL is active low (backlight on with IO12 low) |
 | Tilt servo / Pan servo | IO28 / IO29 | SG90 signal |
 | WROOM EN (reset) | IO22 | EN |
@@ -138,31 +138,38 @@ gyro calibrate
 
 ## Distance sensor
 
-One TOF400C (VL53L1X laser time-of-flight sensor) sits in the head next to
-the camera, so it measures what the camera sees: the distance to a face, an
-object being followed, or a wall. Range is up to about 4 m (less on dark
-surfaces and in sunlight), with one reading over a field of about 27°, at up
-to 50 Hz.
+One VL53L5CX (laser time-of-flight sensor) sits in the head next to the
+camera, so it measures what the camera sees: the distance to a face, an
+object being followed, or a wall. One reading gives 8x8 zones over about
+45°x45° (63° diagonal) at up to 15 Hz, or 4x4 zones at up to 60 Hz. Range is
+up to about 4 m (less on dark surfaces and in sunlight). One zone covers
+about 5.6°, so the centre zones give the distance to a face without the
+background behind it.
 
 - The sensor needs an open hole or an IR-transparent window right at its
-  lens. Plastic or glass in front of it reflects the laser back into it.
+  lens, wide enough for the full field of view. Plastic or glass in front of
+  it, or a casing edge inside the field of view, reflects the laser back
+  into it.
 - It shares the I2C bus with the MPU6050 (400 kHz). INT on IO49 is optional
-  ("data ready"); without it the firmware polls. XSHUT is tied high and is
-  only needed if a second VL53 sensor is added later.
-- **Scan**: standing still, the head pans in small steps and records the
-  distance at each angle, a slow scan of the room (about 5-10 s for 180°).
-  Together with the gyro heading this finds walls and doorways for
-  navigation later.
+  ("data ready"); without it the firmware polls.
+- LPn on IO48: low disables the sensor's I2C interface and stops ranging
+  (power down to save battery); low then high resets it if it hangs.
+- At boot the firmware uploads the sensor firmware (about 86 KB) over I2C,
+  which takes a few seconds at 400 kHz.
+- Camera IR LEDs are switched off during a scan.
+- **Scan**: standing still, the head pans and tilts in steps and records an
+  8x8 grid at each position. A 180° pan with tilt 0-90° in 30° steps is about
+  21 readings, roughly 7-10 s with servo settling. Together with the gyro
+  heading this finds walls, ceiling corners and doorways for navigation
+  later.
 - Obstacle sensors for driving belong on the base (its own ESP32), low and
   facing forward, because the head turns away when it looks at people.
 
 ```text
-tof                     distance in mm
-tof scan [from] [to] [step]   pan the head, print angle and distance
+tof                     centre distance in mm
+tof grid                8x8 distances in mm
+tof scan [from] [to] [step]   pan the head, print angle and grid
 ```
-
-If one reading at a time turns out too slow for scans, a VL53L5CX or
-VL53L7CX (8x8 zones in one reading) uses the same wiring.
 
 ## IR remote
 
@@ -280,5 +287,5 @@ Each phase ends with something testable on the robot. Status as of
 11. **IR remote.** RMT learn and send, `/ir` server endpoints, `ir ...`
     commands, then the gateway tool. Needs only phase 1 (and phase 7 for
     aiming), so it can move earlier.
-12. **Distance sensor.** TOF400C driver, `tof` reading, then `tof scan` with
-    the head servos. Needs phases 7 and 8.
+12. **Distance sensor.** VL53L5CX driver (ST ULD), `tof` reading, then
+    `tof scan` with the head servos. Needs phases 7 and 8.
