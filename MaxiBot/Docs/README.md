@@ -40,11 +40,23 @@ Wiring follows [Schematic.png](Schematic.png).
 | Handshake / Data ready | IO26 / IO27 | GPIO17 / GPIO16 |
 | Camera | CSI connector | OV5647, MJPEG over Wi-Fi |
 | IR LED / IR receiver | IO30 / IO31 | transistor base (or MOSFET gate) / TSOP38238 OUT |
+| Camera IR LEDs enable | IO47 | AO3400 gate (high = LEDs allowed on) |
 
 Power: MAX98357A, both servos and the WROOM run from the common 5 V supply.
 The four INMP441, the MPU6050 and the LCD use 3.3 V. Servo current peaks are
 the largest load, so the supply should give at least 2 A, with a bulk
 capacitor near the servos.
+
+Camera IR LEDs: the two 850 nm IR boards come powered through their screw
+contacts from the camera (3.3 V from the CSI cable). They are separated from
+the camera (nylon screws or insulated pads) and wired to their own 3.3 V
+regulator fed from 5 V, never joined to the camera's 3.3 V. An AO3400
+(logic-level N-MOSFET) switches their GND side: gate on IO47 through 100 Ω,
+100 kΩ gate to GND so the LEDs stay off until the firmware enables them. The
+photoresistor on each board still decides when they light in the dark; IO47
+only allows or forces them off. Their current is not measured yet (rated 1 W
+or 3 W each, up to about 1.8 A for both), so the regulator size and the
+5 V supply margin depend on that measurement.
 
 Microphones: four INMP441 in a square about 4-6 cm across, facing outward,
 away from the speaker and servos. Each mic has its own 100 nF decoupling
@@ -156,7 +168,7 @@ background behind it.
   (power down to save battery); low then high resets it if it hangs.
 - At boot the firmware uploads the sensor firmware (about 86 KB) over I2C,
   which takes a few seconds at 400 kHz.
-- Camera IR LEDs are switched off during a scan.
+- Camera IR LEDs are switched off (IO47 low) during a scan.
 - **Scan**: standing still, the head pans and tilts in steps and records an
   8x8 grid at each position. A 180° pan with tilt 0-90° in 30° steps is about
   21 readings, roughly 7-10 s with servo settling. Together with the gyro
