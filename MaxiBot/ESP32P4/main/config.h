@@ -57,6 +57,12 @@
 #define IMU_I2C_ADDR     0x68
 /* Weight of the gyro in the X/Y complementary filter (rest: accelerometer). */
 #define IMU_GYRO_WEIGHT  0.98f
+/* TOF400C (VL53L1X) on the same bus. */
+#define TOF_I2C_ADDR     0x29
+
+/* Camera IR LEDs: P-channel MOSFET gate, LEDs allowed on with the pin low. */
+#define IR_CAM_LED_PIN   47
+#define IR_CAM_LED_ON    0
 
 /* Head servos (SG90): 50 Hz, 500-2500 us pulse for 0-180 degrees. */
 #define HEAD_TILT_PIN    28
@@ -72,7 +78,9 @@
 #define AUDIO_BCLK_PIN   16
 #define AUDIO_WS_PIN     17
 /* Mic data line A on I2S0 (mic3 left, mic4 right) and line B on I2S1, a
- * clock slave on the same BCLK/WS (mic1 left, mic2 right). */
+ * clock slave on the same BCLK/WS (mic1 left, mic2 right).
+ * Head positions (from above, camera = front): mic1 front-right,
+ * mic2 front-left, mic3 back-left, mic4 back-right. */
 #define AUDIO_MIC_A_PIN  18
 #define AUDIO_MIC_B_PIN  19
 #define AUDIO_DOUT_PIN   21

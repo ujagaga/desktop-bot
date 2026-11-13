@@ -32,6 +32,8 @@
 #include "audio.h"
 #include "wake_word.h"
 #include "ota.h"
+#include "hwtest.h"
+#include "tof.h"
 #include "config.h"
 
 
@@ -159,6 +161,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     lcd_init();
+    hwtest_start();
     ota_start();
     head_start();
     gyro_start();
@@ -276,5 +279,7 @@ void app_main(void)
     audio_register_command();
     wake_word_register_command();
     ota_register_command();
+    hwtest_register_command();
+    tof_register_command();
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 }

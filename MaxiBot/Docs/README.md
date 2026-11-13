@@ -64,6 +64,10 @@ capacitor. Two mics share each data line, one in the left slot and one in the
 right. Mics 1 and 2 (IO19) can be left unpopulated and the robot works with
 mics 3 and 4 on IO18 (one stereo line, left/right direction only).
 
+Positions in the head (seen from above, camera = front), measured with
+`tools/mic_map.py`: mic1 front-right, mic2 front-left, mic3 back-left, mic4
+back-right. The front pair is line B (IO19), the back pair line A (IO18).
+
 The WROOM firmware (`ESP32WROOM/`, ESP-Hosted SPI co-processor) already uses
 handshake GPIO17 and data ready GPIO16, matching the schematic.
 

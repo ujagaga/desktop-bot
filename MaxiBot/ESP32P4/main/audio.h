@@ -10,7 +10,8 @@ void audio_start(void);
 size_t audio_read(int32_t *samples, size_t count);
 
 /* Registers `audio test`: tone on the speaker, record 2 s, levels of all
- * four mics, play back the loudest. */
+ * four mics, play back the loudest. `audio levels [s]`: live peak level
+ * per mic every 250 ms. */
 void audio_register_command(void);
 
 /* Registers GET /audio.wav?s=<1-10>: records and returns a 16-bit WAV with

@@ -107,13 +107,13 @@ static int find_offset(float *best_score)
     int best = 0;
     *best_score = 0;
     for (int d = -MAX_OFFSET; d <= MAX_OFFSET; d++) {
-        double ab = 0, aa = 0, bb = 0;
+        float ab = 0, aa = 0, bb = 0;
         for (int i = MAX_OFFSET; i < ALIGN_FRAMES - MAX_OFFSET; i++) {
             ab += a[i + d] * b[i];
             aa += a[i + d] * a[i + d];
             bb += b[i] * b[i];
         }
-        float score = aa > 0 && bb > 0 ? ab / sqrt(aa * bb) : 0;
+        float score = aa > 0 && bb > 0 ? ab / sqrtf(aa * bb) : 0;
         if (score > *best_score) {
             *best_score = score;
             best = d;
@@ -295,10 +295,45 @@ static void level(const int32_t *buf, size_t frames, int mic, float *rms_dbfs, f
     *peak_dbfs = 20 * log10(peak / 2147483648.0);
 }
 
+/* Peak level of each mic every 250 ms, to find which mic is which by
+ * tapping them one at a time. */
+static int audio_levels(int seconds)
+{
+    const size_t frames = AUDIO_RATE / 4;
+    int32_t *buf = heap_caps_malloc(frames * MICS * sizeof(int32_t), MALLOC_CAP_SPIRAM);
+    if (buf == NULL) {
+        cmd_printf("ERR out of memory\n");
+        return 1;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    cmd_printf("peak dBFS   mic1   mic2   mic3   mic4\n");
+    esp_err_t err = ESP_OK;
+    for (int i = 0; i < seconds * 4 && err == ESP_OK; i++) {
+        err = record(buf, frames);
+        cmd_printf("         ");
+        for (int mic = 0; mic < MICS && err == ESP_OK; mic++) {
+            float rms, peak;
+            level(buf, frames, mic, &rms, &peak);
+            cmd_printf(" %6.1f", peak);
+        }
+        cmd_printf("\n");
+    }
+    xSemaphoreGive(s_lock);
+    free(buf);
+    if (err != ESP_OK) {
+        cmd_printf("ERR audio %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    return 0;
+}
+
 static int cmd_audio(int argc, char **argv)
 {
+    if (argc >= 2 && strcmp(argv[1], "levels") == 0) {
+        return audio_levels(argc > 2 ? atoi(argv[2]) : 10);
+    }
     if (argc != 2 || strcmp(argv[1], "test") != 0) {
-        cmd_printf("ERR audio test\n");
+        cmd_printf("ERR audio test | audio levels [s]\n");
         return 1;
     }
     const size_t frames = AUDIO_RATE * 2;
@@ -356,7 +391,8 @@ void audio_register_command(void)
 {
     const esp_console_cmd_t cmd = {
         .command = "audio",
-        .help = "audio test   tone, record 2 s, mic levels, play back",
+        .help = "audio test   tone, record 2 s, mic levels, play back\n"
+                "audio levels [s]   live peak level per mic (tap mics to find order)",
         .func = cmd_audio,
     };
     cmd_register(&cmd);

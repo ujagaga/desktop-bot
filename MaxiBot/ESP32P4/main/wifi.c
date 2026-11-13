@@ -208,7 +208,12 @@ void wifi_start(void)
     ESP_ERROR_CHECK(mdns_init());
     ESP_ERROR_CHECK(mdns_hostname_set(s_hostname));
     wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&init_cfg));
+    /* No answer from the WROOM (wiring, power): run without Wi-Fi so the
+     * console and the other hardware still work. */
+    if (esp_wifi_init(&init_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "Wi-Fi co-processor not responding, Wi-Fi disabled");
+        return;
+    }
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
@@ -330,6 +335,10 @@ static int cmd_wifi(int argc, char **argv)
         get_ip(ip, sizeof(ip));
         cmd_printf("%s\n", ip);
         cmd_printf("%s.local\n", s_hostname);
+        wifi_ap_record_t ap;
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            cmd_printf("rssi %d dBm, channel %d\n", ap.rssi, ap.primary);
+        }
         if (s_ap_mode) {
             cmd_printf("setup hotspot \"%s\" on 192.168.4.1\n", (char *)s_ap_cfg.ap.ssid);
         }
